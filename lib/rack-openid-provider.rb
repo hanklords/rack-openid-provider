@@ -147,7 +147,7 @@ module Rack
         r = params.merge(
           "ns" => NS,
           "mode" => "id_res",
-          "op_endpoint" => options['op_endpoint'],
+          "op_endpoint" => options['op_endpoint'] || Request.new(env).url,
           "return_to" => openid['return_to'],
           "response_nonce" => gen_nonce,
           "assoc_handle" => assoc_handle,
