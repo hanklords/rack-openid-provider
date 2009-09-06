@@ -51,7 +51,7 @@ module OpenID
     class Assoc
       attr_reader :assoc
       def initialize(assoc, digest); @assoc, @digest = assoc.freeze, digest.new end
-      def sign(mac, value); OpenSSL::HMAC.new(mac, @digest.reset).update(value) end
+      def sign(mac, value); OpenSSL::HMAC.new(mac, @digest.reset).update(value).to_s end
       def size; @digest.size end
       def gen_mac; OpenID.random_bytes(@digest.size) end
     end
