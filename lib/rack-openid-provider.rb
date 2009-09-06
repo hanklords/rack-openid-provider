@@ -254,13 +254,13 @@ module Rack
         return direct_error("dh_consumer_public missing")
       end
       
-      @handle[handle] = mac
+      @handles[handle] = mac
       direct_response r
     end
 
     def checkid(env, openid)
       assoc_handle = openid['assoc_handle']
-      if mac = @handle[assoc_handle]
+      if mac = @handles[assoc_handle]
         env['openid.provider.assoc_handle'] = assoc_handle
         env['openid.provider.mac'] = mac
       else
@@ -275,7 +275,7 @@ module Rack
       invalidate_handle = openid['invalidate_handle']
       if mac = @private_handles[assoc_handle] and OpenID.gen_sig(mac, openid) == openid['sig']
         r = {"is_valid" => "true"}
-        r["invalidate_handle"] = invalidate_handle if @handle[invalidate_handle].nil?
+        r["invalidate_handle"] = invalidate_handle if @handles[invalidate_handle].nil?
         direct_response  r
       else
         direct_response "is_valid" => "false"
