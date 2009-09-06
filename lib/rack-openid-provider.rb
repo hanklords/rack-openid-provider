@@ -180,7 +180,8 @@ module Rack
     include Utils
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
-      'checkid_immediate' => false
+      'checkid_immediate' => false,
+      'pass_not_openid' => false
     }
 
     def initialize(app, options = {})
@@ -212,7 +213,11 @@ module Rack
       when 'check_authentication'
         check_authentication(env, openid)
       else
-        @app.call(env)
+        if @options['pass_not_openid']
+          @app.call(env)
+        else
+          [404, {"Content-Type" => "text/plain"}, ["Not Found: #{env["PATH_INFO"]}"]]
+        end
       end
     end
 
