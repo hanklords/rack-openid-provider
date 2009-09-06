@@ -21,7 +21,7 @@ module OpenID
       }
       n
     end
-                      
+
     def url_encode(h); h.map { |k,v| "#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
     def kv_encode(h); h.map {|k,v| "openid." + k.to_s + ":" + v.to_s + 10.chr }.join end
     def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
@@ -123,10 +123,10 @@ module Rack
         openid = env['openid.provider.req']
         d = URI(openid['return_to'])
         d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
-              
+
         [301, {'Location' => d.to_s}, []]
       end
-      
+
       def positive_htmlform(env, params= {}); gen_htmlform env, gen_pos(env, params) end
       def negative_htmlform(env, params= {}); gen_htmlform env, gen_neg(env, params) end
       def error_htmlform(env, error, params = {}); gen_htmlform env, gen_error(error, params) end
@@ -137,7 +137,7 @@ module Rack
         h.each {|k,v| form << "<input type='hidden' name='#{Rack::Utils.escape k}' value='#{Rack::Utils.escape v}' />"}
         form << "<input type='submit' /></form>"
       end
-                  
+
       def gen_pos(env, params = {})
         openid = env['openid.provider.req']
         invalidate_handle = env['openid.provider.invalidate_handle']
@@ -169,7 +169,7 @@ module Rack
           params.merge "ns" => NS, "openid.mode" => "cancel"
         end
       end
-              
+
       def gen_error(error, params = {})
         params.merge("ns" => NS, "openid.mode" => "error", "openid.error" => error)
       end
@@ -178,10 +178,14 @@ module Rack
     end
     
     include Utils
-    DEFAULT_OPTIONS = {}
+    DEFAULT_OPTIONS = {
+      'handle_timeout' => 36000,
+      'checkid_immediate' => false
+    }
 
-    def initialize(app, options = DEFAULT_OPTIONS)
-      @app, @options = app, options
+    def initialize(app, options = {})
+      @app = app
+      @options = DEFAULT_OPTIONS.merge(options)
       @handles, @private_handles = {}, {}
     end
 
@@ -190,26 +194,23 @@ module Rack
       openid = open_id_params(req.params)
       env['openid.provider.req'] = openid
       env['openid.provider.options'] = @options
+      clean_handles
 
       case openid['mode']
       when 'associate'
-        associate(env, env['openid.provider.req'])
-      when 'checkid_immediate', 'checkid_setup'
-        clean_handles
-        assoc_handle = openid['assoc_handle']
-        if mac = @handle[assoc_handle]
-          env['openid.provider.assoc_handle'] = assoc_handle
-          env['openid.provider.mac'] = mac
+        associate(env, openid)
+      when 'checkid_immediate'
+        if @options['checkid_immediate']
+          checkid(env, openid)
+          @app.call(env)
         else
-          env['openid.provider.invalidate_handle'] = assoc_handle
-          env['openid.provider.assoc_handle'] = phandle = gen_handle
-          env['openid.provider.mac'] = @private_handles[phandle] = gen_mac(32)
+          redirect_negative(env)
         end
-        
+      when 'checkid_setup'
+        checkid(env, openid)
         @app.call(env)
       when 'check_authentication'
-        clean_handles
-        check_authentication(env, env['openid.provider.req'])
+        check_authentication(env, openid)
       else
         @app.call(env)
       end
@@ -227,8 +228,10 @@ module Rack
       session_type = OpenID::DH[openid['session_type']]
       assoc_type = OpenID::Signatures[openid['assoc_type']]
 
-      if not session_type.compatible_key_size? assoc_type.size
-        return direct_error("session type and association type are incompatible", "error_code" => "unsupported-type")
+      if session_type.nil? or assoc_type.nil?
+        return direct_error("session type or association type not supported", "error_code" => "unsupported-type")
+      elsif not session_type.compatible_key_size?(assoc_type.size)
+        return direct_error("session type and association type are incompatible")
       end
       
       mac = assoc_type.gen_mac
@@ -237,23 +240,35 @@ module Rack
         "assoc_handle" => handle,
         "session_type" => session_type,
         "assoc_type" => assoc_type,
-        "expires_in" => 36000
+        "expires_in" => @options['handle_timeout']
       }
       
       begin
         r.update session_type.to_hash(mac, p, g, consumer_public_key)
-      rescue MissingKey
+      rescue OpenID::DH::ANY_KEY::MissingKey
         return direct_error("dh_consumer_public missing")
       end
       
       @handle[handle] = mac
       direct_response r
     end
+
+    def checkid(env, openid)
+      assoc_handle = openid['assoc_handle']
+      if mac = @handle[assoc_handle]
+        env['openid.provider.assoc_handle'] = assoc_handle
+        env['openid.provider.mac'] = mac
+      else
+        env['openid.provider.invalidate_handle'] = assoc_handle
+        env['openid.provider.assoc_handle'] = phandle = gen_handle
+        env['openid.provider.mac'] = @private_handles[phandle] = OpenID::Signatures["HMAC_SHA256"].gen_mac
+      end
+    end
     
     def check_authentication(env, openid)
       assoc_handle = openid['assoc_handle']
-      invalidate_handle = openid["invalidate_handle"]
-      if mac = @private_handles[assoc_handle] and gen_sig(mac, openid) == openid['sig']
+      invalidate_handle = openid['invalidate_handle']
+      if mac = @private_handles[assoc_handle] and OpenID.gen_sig(mac, openid) == openid['sig']
         r = {"is_valid" => "true"}
         r["invalidate_handle"] = invalidate_handle if @handle[invalidate_handle].nil?
         direct_response  r
@@ -284,7 +299,6 @@ module Rack
       ]
     end
     
-    # Association
     def gen_handle; Time.now.utc.iso8601 + OpenID.random_bytes(4) end
   end
 end
