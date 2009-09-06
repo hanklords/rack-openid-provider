@@ -291,7 +291,7 @@ module Rack
     def direct_response(params)
       [
         200,
-        ["Content-Type" => "text/plain"],
+        {"Content-Type" => "text/plain"},
         [OpenID.kv_encode(params.merge "ns" => NS)]
       ]
     end
@@ -299,7 +299,7 @@ module Rack
     def direct_error(error, params = {})
       [
         400,
-        ["Content-Type" => "text/plain"],
+        {"Content-Type" => "text/plain"},
         [OpenID.kv_encode(params.merge "ns" => NS, "mode" => "error", "error" => error)]
       ]
     end
