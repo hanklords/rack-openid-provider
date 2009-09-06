@@ -22,7 +22,7 @@ module OpenID
       n
     end
 
-    def url_encode(h); h.map { |k,v| "#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
+    def url_encode(h); h.map { |k,v| "openid.#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
     def kv_encode(h); h.map {|k,v| "openid." + k.to_s + ":" + v.to_s + 10.chr }.join end
     def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
     def base64_encode(s); [s].pack("m").rstrip end
@@ -30,7 +30,7 @@ module OpenID
     def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes).unpack("H*")[0] end
 
     def gen_sig(mac, params)
-      signed = params['signed'].split(",").map {|k| [k, params[k]]}
+      signed = params["signed"].split(",").map {|k| [k, params[k]]}
       if mac.length == 20
         Signatures["HMAC-SHA1"].sign(  mac, kv_encode(signed))
       else
@@ -134,7 +134,7 @@ module Rack
         openid = env['openid.provider.req']
         d = Rack::Utils.escape(openid['return_to'])
         form = "<form name='openid_form' method='post' action='#{d}'>"
-        h.each {|k,v| form << "<input type='hidden' name='#{Rack::Utils.escape k}' value='#{Rack::Utils.escape v}' />"}
+        h.each {|k,v| form << "<input type='hidden' name='openid.#{Rack::Utils.escape k}' value='#{Rack::Utils.escape v}' />"}
         form << "<input type='submit' /></form>"
       end
 
@@ -145,33 +145,33 @@ module Rack
         mac = env['openid.provider.mac']
         options = env['openid.provider.options']
         r = params.merge(
-          "openid.ns" => NS,
-          "openid.mode" => "id_res",
-          "openid.op_endpoint" => options['op_endpoint'],
-          "openid.return_to" => openid['return_to'],
-          "openid.response_nonce" => gen_nonce,
-          "openid.assoc_handle" => assoc_handle,
+          "ns" => NS,
+          "mode" => "id_res",
+          "op_endpoint" => options['op_endpoint'],
+          "return_to" => openid['return_to'],
+          "response_nonce" => gen_nonce,
+          "assoc_handle" => assoc_handle,
         )
-        r["openid.invalidate_handle"] = invalidate_handle if invalidate_handle
-        if not r["openid.signed"]
-          r["openid.signed"] = "op_endpoint,return_to,assoc_handle,response_nonce"
-          r["openid.signed"] << ",identity,claimed_id" if r["openid.identity"] and r["claimed_id"]
+        r["invalidate_handle"] = invalidate_handle if invalidate_handle
+        if not r["signed"]
+          r["signed"] = "op_endpoint,return_to,assoc_handle,response_nonce"
+          r["signed"] << ",identity,claimed_id" if r["identity"] and r["claimed_id"]
         end
-        r["openid.sig"] = OpenID.gen_sig(mac, r)
+        r["sig"] = OpenID.gen_sig(mac, r)
         r
       end
   
       def gen_neg(env, params = {})
         openid = env['openid.provider.req']
-        if openid['openid.mode'] == "checkid_immediate"
-          params.merge "ns" => NS, "openid.mode" => "setup_needed"
+        if openid['mode'] == "checkid_immediate"
+          params.merge "ns" => NS, "mode" => "setup_needed"
         else
-          params.merge "ns" => NS, "openid.mode" => "cancel"
+          params.merge "ns" => NS, "mode" => "cancel"
         end
       end
 
       def gen_error(error, params = {})
-        params.merge("ns" => NS, "openid.mode" => "error", "openid.error" => error)
+        params.merge("ns" => NS, "mode" => "error", "error" => error)
       end
 
       def gen_nonce; Time.now.utc.iso8601 + OpenID.random_bytes(4) end
