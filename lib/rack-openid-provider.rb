@@ -53,7 +53,7 @@ module OpenID
       def initialize(assoc, digest); @assoc, @digest = assoc.freeze, digest.new end
       def sign(mac, value); OpenSSL::HMAC.new(mac, @digest.reset).update(value) end
       def size; @digest.size end
-      def gen_mac; OpenId.random_bytes(@digest.size) end
+      def gen_mac; OpenID.random_bytes(@digest.size) end
     end
 
     HMAC_SHA1 = Assoc.new "HMAC-SHA1", OpenSSL::Digest::SHA1
