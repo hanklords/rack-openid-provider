@@ -56,8 +56,8 @@ module OpenID
       def gen_mac; OpenId.random_bytes(@digest.size) end
     end
 
-    HMAC_SHA1 = Assoc.new "HMAC_SHA1", OpenSSL::Digest::SHA1
-    HMAC_SHA256 = Assoc.new "HMAC_SHA256", OpenSSL::Digest::SHA256
+    HMAC_SHA1 = Assoc.new "HMAC-SHA1", OpenSSL::Digest::SHA1
+    HMAC_SHA256 = Assoc.new "HMAC-SHA256", OpenSSL::Digest::SHA256
   end
 
   module DH
@@ -266,7 +266,7 @@ module Rack
       else
         env['openid.provider.invalidate_handle'] = assoc_handle
         env['openid.provider.assoc_handle'] = phandle = gen_handle
-        env['openid.provider.mac'] = @private_handles[phandle] = OpenID::Signatures["HMAC_SHA256"].gen_mac
+        env['openid.provider.mac'] = @private_handles[phandle] = OpenID::Signatures["HMAC-SHA256"].gen_mac
       end
     end
     
