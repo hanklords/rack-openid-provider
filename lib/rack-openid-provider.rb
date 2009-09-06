@@ -275,7 +275,7 @@ module Rack
       invalidate_handle = openid['invalidate_handle']
       if mac = @private_handles[assoc_handle] and OpenID.gen_sig(mac, openid) == openid['sig']
         r = {"is_valid" => "true"}
-        r["invalidate_handle"] = invalidate_handle if @handles[invalidate_handle].nil?
+        r["invalidate_handle"] = invalidate_handle if invalidate_handle && @handles[invalidate_handle].nil?
         direct_response  r
       else
         direct_response "is_valid" => "false"
