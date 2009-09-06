@@ -25,9 +25,10 @@ module OpenID
     def url_encode(h); h.map { |k,v| "openid.#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
     def kv_encode(h); h.map {|k,v| "openid." + k.to_s + ":" + v.to_s + 10.chr }.join end
     def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
-    def base64_encode(s); [s].pack("m").rstrip end
+    def base64_encode(s); [s].pack("m").delete("\n") end
     def base64_decode(s); s.unpack("m").first end
-    def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes).unpack("H*")[0] end
+    def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes) end
+    def random_string(length); random_bytes(length / 2).unpack("H*")[0] end
 
     def gen_sig(mac, params)
       signed = params["signed"].split(",").map {|k| [k, params[k]]}
@@ -75,20 +76,40 @@ module OpenID
         raise MissingKey if consumer_public_key.nil?
         p ||= DEFAULT_MODULUS
         g ||= DEFAULT_GEN
-        private_key = random_bytes(@digest.size).to_i(16) % p
-        public_key = g ** private_key % p
-        shared = consumer_public_key ** private_key % p
-        shared_hashed = @digest.reset.update(OpenID.btwoc(shared).digest)
+        private_key, public_key = generate_pair(p,g)
+        shared = compute_shared(consumer_public_key, private_key, p)
+        shared_hashed = @digest.reset.update(OpenID.btwoc(shared)).digest
         {
           "dh_server_public" => OpenID.base64_encode(OpenID.btwoc(public_key)),
           "enc_mac_key" => OpenID.base64_encode(sxor(shared_hashed, mac))
         }
       end
 
+      def compute_shared(pub, pri, p = DEFAULT_MODULUS); powermod(pub, pri, p) end
+
+      def generate_pair(p = DEFAULT_MODULUS, g = DEFAULT_GEN)
+        private_key = OpenID.random_string(p.to_s(16).size).to_i(16) % p
+        public_key = powermod(g, private_key, p)
+        [private_key, public_key]
+      end
+
       private
       def sxor(s1, s2)
         # s1 = s1.to_enum(:each_byte); s2 = s2.to_enum(:each_byte)
         s1.bytes.zip(s2.bytes).map { |x,y| (x^y).chr }.join
+      end
+
+      # x ** n % p
+      # Taken from http://blade.nagaokaut.ac.jp/cgi-bin/scat.rb/ruby/ruby-talk/19098
+      # by Eric Lee Green.
+      def powermod(x, n, q)
+        y=1
+        while n != 0
+          y=(y*x) % q if n[0]==1
+          n = n >> 1
+          x = (x ** 2) % q
+        end
+        y
       end
     end
 
@@ -97,12 +118,12 @@ module OpenID
 
     class NoEncryption
       def self.compatible_key_size?(size); true end
-      def self.session_name; "no-encryption".freeze end
+      def self.session_name; "no-encryption" end
       def self.to_hash(mac, p, g, c); {"mac_key" => OpenID.base64_encode(mac)} end
     end
 
     def self.[](name)
-      @sessions ||= Hash[*constants.each {|c|
+      @sessions ||= Hash[*constants.map {|c|
         s = const_get(c)
         [s.session_name, s] if s.respond_to? :session_name
       }.compact.flatten]
@@ -174,7 +195,7 @@ module Rack
         params.merge("ns" => NS, "mode" => "error", "error" => error)
       end
 
-      def gen_nonce; Time.now.utc.iso8601 + OpenID.random_bytes(4) end
+      def gen_nonce; Time.now.utc.iso8601 + OpenID.random_string(6) end
     end
     
     include Utils
@@ -227,8 +248,8 @@ module Rack
     def associate(env, openid)
       dh_modulus, dh_gen, dh_consumer_public = openid['dh_modulus'], openid['dh_gen'], openid['dh_consumer_public']
       p = dh_modulus && OpenID.ctwob(OpenID.base64_decode(dh_modulus))
-      g = dh_gen && OpenIDctwob(OpenID.base64_decode(dh_gen))
-      consumer_public_key = dh_consumer_public && OpenIDctwob(OpenIDbase64_decode(dh_consumer_public))
+      g = dh_gen && OpenID.ctwob(OpenID.base64_decode(dh_gen))
+      consumer_public_key = dh_consumer_public && OpenID.ctwob(OpenID.base64_decode(dh_consumer_public))
 
       session_type = OpenID::DH[openid['session_type']]
       assoc_type = OpenID::Signatures[openid['assoc_type']]
@@ -243,14 +264,14 @@ module Rack
       handle = gen_handle
       r = {
         "assoc_handle" => handle,
-        "session_type" => session_type,
-        "assoc_type" => assoc_type,
+        "session_type" => openid['session_type'],
+        "assoc_type" => openid['assoc_type'],
         "expires_in" => @options['handle_timeout']
       }
       
       begin
         r.update session_type.to_hash(mac, p, g, consumer_public_key)
-      rescue OpenID::DH::ANY_KEY::MissingKey
+      rescue OpenID::DH::SHA_ANY::MissingKey
         return direct_error("dh_consumer_public missing")
       end
       
@@ -304,6 +325,6 @@ module Rack
       ]
     end
     
-    def gen_handle; Time.now.utc.iso8601 + OpenID.random_bytes(4) end
+    def gen_handle; Time.now.utc.iso8601 + OpenID.random_string(6) end
   end
 end
