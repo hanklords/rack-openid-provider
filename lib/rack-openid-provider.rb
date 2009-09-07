@@ -191,28 +191,23 @@ module Rack # :nodoc:
   #   }
   class OpenIDProvider
     class YadisServe
-      DEFAULT_YADIS = %{
-<?xml version="1.0" encoding="UTF-8"?>
+      DEFAULT_YADIS =
+%{<?xml version="1.0" encoding="UTF-8"?>
 <xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
 <XRD>
   <Service priority="0">
-    %s
-    %s
+%s
   </Service>
 </XRD>
 </xrds:XRDS>
 }.freeze
 
-      def initialize(options = {"Type" => OpenID::SERVER, "URI" => true}); @options = options end
-      def call(env); [200, {"Content-Type" => "application/xrds+xml"}, [content] ] end
+      def initialize(options = {"Type" => [OpenID::SERVER], "URI" => true}); @options = options end
+      def call(env); [200, {"Content-Type" => "application/xrds+xml"}, [DEFAULT_YADIS % [content(env)]] ] end
 
       def content(env)
-        types, uris = @options["Type"], @options["URI"]
-        uris = [Request.new(env).url.sub(/\/xrds$/, '')] if uris == true
-        DEFAULT_YADIS % [
-          types.map {|t| "<Type>" + t + "</Type>\n"}, 
-          uris.map {|u| "<URI>" + u + "</URI>\n"}
-        ]
+        @options["URI"] = [Request.new(env).url.sub(/\/xrds$/, '')] if @options["URI"] == true
+        @options.map {|k,v| v.map {|t| "    <"+k+">"+t+"</"+k+">"}.join("\n")}.join("\n")
       end
     end
 
