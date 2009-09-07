@@ -46,7 +46,7 @@ class TestOptions < Test::Unit::TestCase
     openid = OpenID.kv_decode last_response.body
     assert_equal OpenID::NS, openid["openid.ns"]
     assert_equal "error", openid["openid.mode"]
-    assert_equal "maelclerambault@yahoo.fr", openid["openid.contact"]
+    assert_equal "me@example.org", openid["openid.contact"]
     assert_equal "No reference", openid["openid.reference"]
   end
 end
