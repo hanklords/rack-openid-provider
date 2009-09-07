@@ -409,7 +409,7 @@ module Rack # :nodoc:
       [
         200,
         {"Content-Type" => "text/plain"},
-        [OpenID.kv_encode params.merge("ns" => OpenID::NS)]
+        [OpenID.kv_encode(params.merge("ns" => OpenID::NS))]
       ]
     end
 
