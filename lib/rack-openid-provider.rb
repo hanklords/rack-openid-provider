@@ -183,6 +183,9 @@ module Rack # :nodoc:
     #    end
     #  end
     module Utils
+      class NoReturnToRedirect < StandardError # :nodoc:
+      end
+
       # Positive assertion by HTTP redirect
       def redirect_positive(env, params = {}); redirect_res env, gen_pos(env, params) end
 
@@ -191,7 +194,6 @@ module Rack # :nodoc:
 
       # Error response by HTTP redirect
       def redirect_error(env, error, params = {}); redirect_res env, gen_error(env, error, params) end
-
       
       def redirect_res(env, h) # :nodoc:
         openid = env['openid.provider.req']
@@ -199,7 +201,7 @@ module Rack # :nodoc:
           d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
           [301, {'Location' => d.to_s}, []]
         else
-          raise "Internal OpenID Provider error : Attempt to redirect to inexistent return_to address"
+          raise NoReturnToRedirect
         end
       end
 
@@ -219,7 +221,7 @@ module Rack # :nodoc:
           h.each {|k,v| form << "<input type='hidden' name='openid.#{Rack::Utils.escape k}' value='#{Rack::Utils.escape v}' />"}
           form << "<input type='submit' /></form>"
         else
-          raise "Internal OpenID Provider error : Attempt to redirect to inexistent return_to address"
+          raise NoReturnToRedirect
         end
       end
 
@@ -246,7 +248,7 @@ module Rack # :nodoc:
         r["sig"] = OpenID.gen_sig(mac, r)
         r
       end
-  
+
       def gen_neg(env, params = {}) # :nodoc:
         openid = env['openid.provider.req']
         if openid['mode'] == "checkid_immediate"
@@ -264,7 +266,7 @@ module Rack # :nodoc:
         error_res.merge(params)
       end
     end
-    
+
     include Utils
     no_openid = lambda {|env| [400, {"Content-Type" => "text/plain"}, ["Invalid OpenID Request"]]}
 
