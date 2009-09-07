@@ -139,7 +139,7 @@ module Rack
       include OpenID
       def redirect_positive(env, params = {}); redirect_res env, gen_pos(env, params) end
       def redirect_negative(env, params = {}); redirect_res env, gen_neg(env, params) end
-      def redirect_error(env, error, params = {}); redirect_res env, gen_error(error, params) end
+      def redirect_error(env, error, params = {}); redirect_res env, gen_error(env, error, params) end
       def redirect_res(env, h)
         openid = env['openid.provider.req']
         d = URI(openid['return_to'])
@@ -150,7 +150,7 @@ module Rack
 
       def positive_htmlform(env, params= {}); gen_htmlform env, gen_pos(env, params) end
       def negative_htmlform(env, params= {}); gen_htmlform env, gen_neg(env, params) end
-      def error_htmlform(env, error, params = {}); gen_htmlform env, gen_error(error, params) end
+      def error_htmlform(env, error, params = {}); gen_htmlform env, gen_error(env, error, params) end
       def gen_htmlform(env, h)
         openid = env['openid.provider.req']
         d = Rack::Utils.escape(openid['return_to'])
@@ -192,7 +192,7 @@ module Rack
         end
       end
 
-      def gen_error(error, params = {})
+      def gen_error(env, error, params = {})
         params.merge("ns" => NS, "mode" => "error", "error" => error)
       end
 
@@ -257,9 +257,9 @@ module Rack
       assoc_type = OpenID::Signatures[openid['assoc_type']]
 
       if session_type.nil? or assoc_type.nil?
-        return direct_error("session type or association type not supported", "error_code" => "unsupported-type")
+        return direct_error(env, "session type or association type not supported", "error_code" => "unsupported-type")
       elsif not session_type.compatible_key_size?(assoc_type.size)
-        return direct_error("session type and association type are incompatible")
+        return direct_error(env, "session type and association type are incompatible")
       end
       
       mac = assoc_type.gen_mac
@@ -274,11 +274,11 @@ module Rack
       begin
         r.update session_type.to_hash(mac, p, g, consumer_public_key)
       rescue OpenID::DH::SHA_ANY::MissingKey
-        return direct_error("dh_consumer_public missing")
+        return direct_error(env, "dh_consumer_public missing")
       end
       
       @handles[handle] = mac
-      direct_response r
+      direct_response env, r
     end
 
     def checkid(env, openid)
@@ -304,9 +304,9 @@ module Rack
       if mac = @private_handles[assoc_handle] and @nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, openid) == openid['sig']
         r = {"is_valid" => "true"}
         r["invalidate_handle"] = invalidate_handle if invalidate_handle && @handles[invalidate_handle].nil?
-        direct_response  r
+        direct_response  env, r
       else
-        direct_response "is_valid" => "false"
+        direct_response env, "is_valid" => "false"
       end
     end
 
@@ -316,7 +316,7 @@ module Rack
       openid_params
     end
     
-    def direct_response(params)
+    def direct_response(env, params)
       [
         200,
         {"Content-Type" => "text/plain"},
@@ -324,11 +324,11 @@ module Rack
       ]
     end
 
-    def direct_error(error, params = {})
+    def direct_error(env, error, params = {})
       [
         400,
         {"Content-Type" => "text/plain"},
-        [OpenID.kv_encode(params.merge "ns" => NS, "mode" => "error", "error" => error)]
+        [OpenID.kv_encode(gen_error(env, error, params))]
       ]
     end
     
