@@ -142,10 +142,12 @@ module Rack
       def redirect_error(env, error, params = {}); redirect_res env, gen_error(env, error, params) end
       def redirect_res(env, h)
         openid = env['openid.provider.req']
-        d = URI(openid['return_to'])
-        d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
-
-        [301, {'Location' => d.to_s}, []]
+        if d = URI(openid['return_to'])
+          d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
+          [301, {'Location' => d.to_s}, []]
+        else
+          raise "Internal OpenID Provider error : Attempt to redirect to inexistent return_to address"
+        end
       end
 
       def positive_htmlform(env, params= {}); gen_htmlform env, gen_pos(env, params) end
@@ -153,10 +155,13 @@ module Rack
       def error_htmlform(env, error, params = {}); gen_htmlform env, gen_error(env, error, params) end
       def gen_htmlform(env, h)
         openid = env['openid.provider.req']
-        d = Rack::Utils.escape(openid['return_to'])
-        form = "<form name='openid_form' method='post' action='#{d}'>"
-        h.each {|k,v| form << "<input type='hidden' name='openid.#{Rack::Utils.escape k}' value='#{Rack::Utils.escape v}' />"}
-        form << "<input type='submit' /></form>"
+        if d = Rack::Utils.escape(openid['return_to'])
+          form = "<form name='openid_form' method='post' action='#{d}'>"
+          h.each {|k,v| form << "<input type='hidden' name='openid.#{Rack::Utils.escape k}' value='#{Rack::Utils.escape v}' />"}
+          form << "<input type='submit' /></form>"
+        else
+          raise "Internal OpenID Provider error : Attempt to redirect to inexistent return_to address"
+        end
       end
 
       def gen_pos(env, params = {})
@@ -202,17 +207,20 @@ module Rack
     end
     
     include Utils
+    no_openid = lambda {|env| [400, {"Content-Type" => "text/plain"}, ["Invalid OpenID Request"]]}
+
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
       'nonce_timeout' => 300,
       'checkid_immediate' => false,
-      'pass_not_openid' => false
+      'no_openid' => no_openid
     }
 
     def initialize(app, options = {})
       @app = app
       @options = DEFAULT_OPTIONS.merge(options)
+      @default = @options['no_openid'] || @app
       @handles, @private_handles, @nonces = {}, {}, {}
     end
 
@@ -221,6 +229,8 @@ module Rack
       openid = open_id_params(req.params)
       env['openid.provider.req'] = openid
       env['openid.provider.options'] = @options
+
+      return @default.call(env) if not openid['ns'] == NS
       clean_handles
 
       case openid['mode']
@@ -239,11 +249,7 @@ module Rack
       when 'check_authentication'
         check_authentication(env, openid)
       else
-        if @options['pass_not_openid']
-          @app.call(env)
-        else
-          [404, {"Content-Type" => "text/plain"}, ["Not Found: #{env["PATH_INFO"]}"]]
-        end
+        @default.call(env)
       end
     end
 

@@ -87,7 +87,7 @@ class TestNo < Test::Unit::TestCase
 
   def test_default
     get "/"
-    assert last_response.not_found?
+    assert last_response.client_error?
   end
 end
 
