@@ -238,7 +238,7 @@ module Rack # :nodoc:
           "op_endpoint" => options['op_endpoint'] || Request.new(env).url,
           "return_to" => openid['return_to'],
           "response_nonce" => nonce,
-          "assoc_handle" => assoc_handle,
+          "assoc_handle" => assoc_handle
         )
         r["invalidate_handle"] = invalidate_handle if invalidate_handle
         if not r["signed"]
@@ -390,7 +390,7 @@ module Rack # :nodoc:
       [
         200,
         {"Content-Type" => "text/plain"},
-        [OpenID.kv_encode(params.merge "ns" => OpenID::NS)]
+        [OpenID.kv_encode params.merge("ns" => OpenID::NS)]
       ]
     end
 
