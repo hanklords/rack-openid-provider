@@ -193,9 +193,12 @@ module Rack
       end
 
       def gen_error(env, error, params = {})
-        params.merge("ns" => NS, "mode" => "error", "error" => error)
+        options = env['openid.provider.options']
+        error_res = {"ns" => NS, "mode" => "error", "error" => error}
+        error_res["contact"] = options["contact"] if options["contact"]
+        error_res["reference"] = options["reference"] if options["reference"]
+        error_res.merge(params)
       end
-
     end
     
     include Utils
