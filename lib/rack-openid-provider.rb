@@ -278,6 +278,18 @@ module Rack # :nodoc:
       'no_openid' => no_openid
     }
 
+    DEFAULT_YADIS = %{
+<?xml version="1.0" encoding="UTF-8"?>
+<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
+<XRD>
+  <Service priority="0">
+    <Type>http://specs.openid.net/auth/2.0/server</Type>
+    <URI>%s</URI>
+  </Service>
+</XRD>
+</xrds:XRDS>
+}
+
     def initialize(app, options = {})
       @app = app
       @options = DEFAULT_OPTIONS.merge(options)
