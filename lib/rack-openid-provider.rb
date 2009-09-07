@@ -22,6 +22,8 @@ module OpenID
   VERSION="0.0"
 
   NS="http://specs.openid.net/auth/2.0".freeze
+  IDENTIFIER_SELECT="http://specs.openid.net/auth/2.0/identifier_select".freeze
+
   class << self
     # Implements \OpenID btwoc function
     def btwoc(n)
@@ -185,6 +187,8 @@ module Rack # :nodoc:
     module Utils
       class NoReturnToRedirect < StandardError # :nodoc:
       end
+      class NoIdentity < StandardError # :nodoc:
+      end
 
       # Positive assertion by HTTP redirect
       def redirect_positive(env, params = {}); redirect_res env, gen_pos(env, params) end
@@ -226,6 +230,11 @@ module Rack # :nodoc:
       end
 
       def gen_pos(env, params = {}) # :nodoc:
+        if params["claimed_id"] == OpenID::IDENTIFIER_SELECT or
+            params["identity"] == OpenID::IDENTIFIER_SELECT
+          raise NoIdentity
+        end
+
         openid = env['openid.provider.req']
         invalidate_handle = env['openid.provider.invalidate_handle']
         assoc_handle = env['openid.provider.assoc_handle']
