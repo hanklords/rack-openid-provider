@@ -22,7 +22,8 @@ DEFAULT_REQUEST = {
   "openid.mode"       => "checkid_setup",
   "openid.claimed_id" => "http://example.org",
   "openid.identity"   => "http://example.org",
-  "openid.return_to"  => "http://example.org"
+  "openid.return_to"  => "http://example.org",
+  "openid.assoc_handle" => "INVALIDHANDLE"
 }
 
 class TestNo < Test::Unit::TestCase
@@ -49,13 +50,21 @@ class TestNo < Test::Unit::TestCase
     assert_equal "setup_needed", openid["openid.mode"]
   end
 
+  def test_check_authentication
+    post "/", DEFAULT_REQUEST.merge("openid.mode" => "check_authentication")
+    openid = OpenID.kv_decode last_response.body
+    assert_equal OpenID::NS, openid["openid.ns"]
+    assert_equal "false", openid["openid.is_valid"]
+    assert_nil openid["openid.invalidate_handle"]
+  end
+
   def test_default
     get "/"
     assert last_response.not_found?
   end
 end
 
-class TestYes < Test::Unit::TestCase
+class TestCheckId < Test::Unit::TestCase
   include Rack::Test::Methods
 
   def app
@@ -67,7 +76,7 @@ class TestYes < Test::Unit::TestCase
 
   def sxor(s1, s2); s1.bytes.zip(s2.bytes).map { |x,y| (x^y).chr }.join end
 
-  def test_checkid_setup
+  def test_check_authentication
     post "/", DEFAULT_REQUEST
     assert last_response.redirect?
     openid = Rack::Utils.parse_query URI.parse(last_response.location).query
@@ -78,14 +87,23 @@ class TestYes < Test::Unit::TestCase
     assert_equal "http://example.org/", openid["openid.op_endpoint"]
     assert_equal "http://example.org", openid["openid.claimed_id"]
     assert_equal "http://example.org", openid["openid.identity"]
+    assert_equal "INVALIDHANDLE", openid["openid.invalidate_handle"]
     assert_equal "op_endpoint,return_to,assoc_handle,response_nonce,identity,claimed_id", openid["openid.signed"]
     assert_match /^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ[a-z0-9]+/, openid["openid.response_nonce"]
 
     post "/", openid.merge( "openid.mode" => "check_authentication")
     assert last_response.ok?
-    openid = OpenID.kv_decode last_response.body
-    assert_equal OpenID::NS, openid["openid.ns"]
-    assert_equal "true", openid["openid.is_valid"]
+    openid2 = OpenID.kv_decode last_response.body
+    assert_equal OpenID::NS, openid2["openid.ns"]
+    assert_equal "true", openid2["openid.is_valid"]
+    assert_equal "INVALIDHANDLE", openid2["openid.invalidate_handle"]
+
+    # Check nonce verification
+    post "/", openid.merge( "openid.mode" => "check_authentication")
+    assert last_response.ok?
+    openid2 = OpenID.kv_decode last_response.body
+    assert_equal OpenID::NS, openid2["openid.ns"]
+    assert_equal "false", openid2["openid.is_valid"]
   end
 
   def test_associate

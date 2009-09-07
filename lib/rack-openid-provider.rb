@@ -164,13 +164,14 @@ module Rack
         invalidate_handle = env['openid.provider.invalidate_handle']
         assoc_handle = env['openid.provider.assoc_handle']
         mac = env['openid.provider.mac']
+        nonce = env['openid.provider.nonce']
         options = env['openid.provider.options']
         r = params.merge(
           "ns" => NS,
           "mode" => "id_res",
           "op_endpoint" => options['op_endpoint'] || Request.new(env).url,
           "return_to" => openid['return_to'],
-          "response_nonce" => gen_nonce,
+          "response_nonce" => nonce,
           "assoc_handle" => assoc_handle,
         )
         r["invalidate_handle"] = invalidate_handle if invalidate_handle
@@ -195,12 +196,12 @@ module Rack
         params.merge("ns" => NS, "mode" => "error", "error" => error)
       end
 
-      def gen_nonce; Time.now.utc.iso8601 + OpenID.random_string(6) end
     end
     
     include Utils
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
+      'nonce_timeout' => 300,
       'checkid_immediate' => false,
       'pass_not_openid' => false
     }
@@ -208,7 +209,7 @@ module Rack
     def initialize(app, options = {})
       @app = app
       @options = DEFAULT_OPTIONS.merge(options)
-      @handles, @private_handles = {}, {}
+      @handles, @private_handles, @nonces = {}, {}, {}
     end
 
     def call(env)
@@ -286,15 +287,20 @@ module Rack
         env['openid.provider.mac'] = mac
       else
         env['openid.provider.invalidate_handle'] = assoc_handle
-        env['openid.provider.assoc_handle'] = phandle = gen_handle
-        env['openid.provider.mac'] = @private_handles[phandle] = OpenID::Signatures["HMAC-SHA256"].gen_mac
+        env['openid.provider.assoc_handle'] = assoc_handle = gen_handle
+        env['openid.provider.mac'] = @private_handles[assoc_handle] = OpenID::Signatures["HMAC-SHA256"].gen_mac
       end
+      env['openid.provider.nonce'] = nonce = gen_nonce
+      @nonces[nonce] = assoc_handle
     end
     
     def check_authentication(env, openid)
       assoc_handle = openid['assoc_handle']
       invalidate_handle = openid['invalidate_handle']
-      if mac = @private_handles[assoc_handle] and OpenID.gen_sig(mac, openid) == openid['sig']
+      nonce = openid['response_nonce']
+
+      # Check if assoc_handle, nonce and signature are valid. Then delete the response nonce
+      if mac = @private_handles[assoc_handle] and @nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, openid) == openid['sig']
         r = {"is_valid" => "true"}
         r["invalidate_handle"] = invalidate_handle if invalidate_handle && @handles[invalidate_handle].nil?
         direct_response  r
@@ -326,5 +332,6 @@ module Rack
     end
     
     def gen_handle; Time.now.utc.iso8601 + OpenID.random_string(6) end
+    def gen_nonce;  Time.now.utc.iso8601 + OpenID.random_string(6) end
   end
 end
