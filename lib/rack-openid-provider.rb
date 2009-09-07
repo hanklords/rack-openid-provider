@@ -23,6 +23,7 @@ module OpenID
 
   NS="http://specs.openid.net/auth/2.0".freeze
   class << self
+    # Implements \OpenID btwoc function
     def btwoc(n)
       raise if n < 0
       r = (n % 0x100).chr
@@ -31,6 +32,7 @@ module OpenID
       r
     end
     
+    # Inverse form of btwoc
     def ctwob(s)
       n, sl = 0, s.length - 1
       0.upto(sl) {|i|
@@ -39,14 +41,28 @@ module OpenID
       n
     end
 
+    # Encode \OpenID parameters as a HTTP GET query string
     def url_encode(h); h.map { |k,v| "openid.#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
+
+    # Encode \OpenID parameters as Key-Value format
     def kv_encode(h); h.map {|k,v| "openid." + k.to_s + ":" + v.to_s + 10.chr }.join end
+
+    # Decode \OpenID parameters from Key-Value format
     def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
+
+    # Encode in base64
     def base64_encode(s); [s].pack("m").delete("\n") end
+
+    # Decode from base64
     def base64_decode(s); s.unpack("m").first end
+
+    # Generate _bytes_ random bytes
     def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes) end
+
+    # Generate a random string _length_ long
     def random_string(length); random_bytes(length / 2).unpack("H*")[0] end
 
+    # Generate an \OpenID signature
     def gen_sig(mac, params)
       signed = params["signed"].split(",").map {|k| [k, params[k]]}
       if mac.length == 20
@@ -57,7 +73,7 @@ module OpenID
     end
   end
 
-  module Signatures
+  module Signatures # :nodoc: all
     def self.[](name)
       @assocs ||= Hash[*constants.map {|c|
         a = const_get(c)
@@ -78,7 +94,7 @@ module OpenID
     HMAC_SHA256 = Assoc.new "HMAC-SHA256", OpenSSL::Digest::SHA256
   end
 
-  module DH
+  module DH # :nodoc: all
     DEFAULT_MODULUS=0xDCF93A0B883972EC0E19989AC5A2CE310E1D37717E8D9571BB7623731866E61EF75A2E27898B057F9891C2E27A639C3F29B60814581CD3B2CA3986D2683705577D45C2E7E52DC81C7A171876E5CEA74B1448BFDFAF18828EFD2519F14E45E3826634AF1949E5B535CC829A483B8A76223E5D490A257F05BDFF16F2FB22C583AB
     DEFAULT_GEN=2
 
@@ -150,14 +166,34 @@ module OpenID
 end
 
 
-module Rack
-  class OpenIdProvider
+module Rack # :nodoc:
+  # This is a Rack middleware, use it as such:
+  #   Rack::Builder.new {
+  #     use Rack::OpenIDProvider, custom_options
+  #     run MyProvider.new
+  #   }
+  class OpenIDProvider
+
+    # You should include this module in your Rack application like this:
+    #  class MyProvider
+    #    include Rack::OpenIDProvider::Utils
+    #    
+    #    def call(env)
+    #      ... do stuff ...
+    #    end
+    #  end
     module Utils
-      include OpenID
+      # Positive assertion by HTTP redirect
       def redirect_positive(env, params = {}); redirect_res env, gen_pos(env, params) end
+
+      # Negative assertion by HTTP redirect
       def redirect_negative(env, params = {}); redirect_res env, gen_neg(env, params) end
+
+      # Error response by HTTP redirect
       def redirect_error(env, error, params = {}); redirect_res env, gen_error(env, error, params) end
-      def redirect_res(env, h)
+
+      
+      def redirect_res(env, h) # :nodoc:
         openid = env['openid.provider.req']
         if d = URI(openid['return_to'])
           d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
@@ -167,10 +203,16 @@ module Rack
         end
       end
 
+      # Generate a positive assertion HTML form
       def positive_htmlform(env, params= {}); gen_htmlform env, gen_pos(env, params) end
+
+      # Generate a negative assertion HTML form
       def negative_htmlform(env, params= {}); gen_htmlform env, gen_neg(env, params) end
+
+      # Generate an error HTML form
       def error_htmlform(env, error, params = {}); gen_htmlform env, gen_error(env, error, params) end
-      def gen_htmlform(env, h)
+
+      def gen_htmlform(env, h) # :nodoc:
         openid = env['openid.provider.req']
         if d = Rack::Utils.escape(openid['return_to'])
           form = "<form name='openid_form' method='post' action='#{d}'>"
@@ -181,7 +223,7 @@ module Rack
         end
       end
 
-      def gen_pos(env, params = {})
+      def gen_pos(env, params = {}) # :nodoc:
         openid = env['openid.provider.req']
         invalidate_handle = env['openid.provider.invalidate_handle']
         assoc_handle = env['openid.provider.assoc_handle']
@@ -189,7 +231,7 @@ module Rack
         nonce = env['openid.provider.nonce']
         options = env['openid.provider.options']
         r = params.merge(
-          "ns" => NS,
+          "ns" => OpenID::NS,
           "mode" => "id_res",
           "op_endpoint" => options['op_endpoint'] || Request.new(env).url,
           "return_to" => openid['return_to'],
@@ -205,18 +247,18 @@ module Rack
         r
       end
   
-      def gen_neg(env, params = {})
+      def gen_neg(env, params = {}) # :nodoc:
         openid = env['openid.provider.req']
         if openid['mode'] == "checkid_immediate"
-          params.merge "ns" => NS, "mode" => "setup_needed"
+          params.merge "ns" => OpenID::NS, "mode" => "setup_needed"
         else
-          params.merge "ns" => NS, "mode" => "cancel"
+          params.merge "ns" => OpenID::NS, "mode" => "cancel"
         end
       end
 
-      def gen_error(env, error, params = {})
+      def gen_error(env, error, params = {}) # :nodoc:
         options = env['openid.provider.options']
-        error_res = {"ns" => NS, "mode" => "error", "error" => error}
+        error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => error}
         error_res["contact"] = options["contact"] if options["contact"]
         error_res["reference"] = options["reference"] if options["reference"]
         error_res.merge(params)
@@ -247,7 +289,7 @@ module Rack
       env['openid.provider.req'] = openid
       env['openid.provider.options'] = @options
 
-      return @default.call(env) if not openid['ns'] == NS
+      return @default.call(env) if not openid['ns'] == OpenID::NS
       clean_handles
 
       case openid['mode']
@@ -346,7 +388,7 @@ module Rack
       [
         200,
         {"Content-Type" => "text/plain"},
-        [OpenID.kv_encode(params.merge "ns" => NS)]
+        [OpenID.kv_encode(params.merge "ns" => OpenID::NS)]
       ]
     end
 

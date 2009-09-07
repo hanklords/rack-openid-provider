@@ -1,0 +1,38 @@
+# -*- encoding: utf-8 -*-
+
+require 'rake/rdoctask'
+require 'rake/packagetask'
+require 'rake/gempackagetask'
+require 'rake/testtask'
+
+require 'lib/rack-openid-provider'
+
+PKG_FILES = FileList["lib/rack-openid-provider.rb", "LICENSE", "rakefile", "test/*.rb"].to_a
+
+spec = Gem::Specification.new do |s|
+  s.summary = "OpenID Provider for Ruby Rack"
+  s.name = "rack-openid-provider"
+  s.author = "Maël Clérambault"
+  s.email =  "maelclerambault@yahoo.fr"
+  s.version = OpenID::VERSION
+  s.files = PKG_FILES
+  s.test_files = FileList["test/*.rb"].to_a
+end
+
+Rake::RDocTask.new do |rd|
+  rd.rdoc_files.include "lib/rack-openid-provider.rb"
+  rd.options << "--inline-source"
+end
+
+Rake::GemPackageTask.new spec do |p|
+  p.need_tar_gz = true
+end
+
+Rake::TestTask.new
+
+desc "Create a gemspec file"
+task :spec do
+  spec_clone = spec.clone
+  spec_clone.test_files = nil
+  open("rack-openid-provider.gemspec", "w") {|g| g.puts spec_clone.to_ruby }
+end

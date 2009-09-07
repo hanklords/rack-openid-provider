@@ -1,11 +1,9 @@
-$: << "lib"
-
 require "test/unit"
 require "rack/test"
 require "rack-openid-provider"
 
 class YesProvider
-  include Rack::OpenIdProvider::Utils
+  include Rack::OpenIDProvider::Utils
   def call(env)
     openid = env['openid.provider.req']
     redirect_positive(env, 'claimed_id' => openid['claimed_id'], 'identity' => openid['identity'] )
@@ -13,7 +11,7 @@ class YesProvider
 end
 
 class NoProvider
-  include Rack::OpenIdProvider::Utils
+  include Rack::OpenIDProvider::Utils
   def call(env); redirect_negative(env) end
 end
 
@@ -31,7 +29,7 @@ class TestOptions < Test::Unit::TestCase
 
   def app
     Rack::Builder.new {
-      use Rack::OpenIdProvider, {"contact" => "maelclerambault@yahoo.fr", "reference" => "No reference"}
+      use Rack::OpenIDProvider, {"contact" => "maelclerambault@yahoo.fr", "reference" => "No reference"}
       run NoProvider.new
     }.to_app
   end
@@ -58,7 +56,7 @@ class TestNo < Test::Unit::TestCase
 
   def app
     Rack::Builder.new {
-      use Rack::OpenIdProvider
+      use Rack::OpenIDProvider
       run NoProvider.new
     }.to_app
   end
@@ -96,7 +94,7 @@ class TestCheckId < Test::Unit::TestCase
 
   def app
     Rack::Builder.new {
-      use Rack::OpenIdProvider
+      use Rack::OpenIDProvider
       run YesProvider.new
     }.to_app
   end
