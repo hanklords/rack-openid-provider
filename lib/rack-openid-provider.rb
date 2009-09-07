@@ -19,6 +19,8 @@ require 'time'
 require 'uri'
 
 module OpenID
+  VERSION="0.0"
+
   NS="http://specs.openid.net/auth/2.0".freeze
   class << self
     def btwoc(n)
