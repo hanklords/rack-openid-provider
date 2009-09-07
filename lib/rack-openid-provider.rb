@@ -312,7 +312,6 @@ module Rack # :nodoc:
     def initialize(app, options = {})
       @app = app
       @options = DEFAULT_OPTIONS.merge(options)
-      @default = @options['no_openid'] || @app
       @handles, @private_handles, @nonces = {}, {}, {}
     end
 
@@ -339,7 +338,9 @@ module Rack # :nodoc:
       when 'check_authentication'
         check_authentication(env, openid)
       else
-        @default.call(env)
+        s,h,b = (@options['no_openid'] || @app).call(env)
+        h['X-XRDS-Location'] = @options['xrds_location'] if @options['xrds_location']
+        [s,h,b]
       end
     end
 
