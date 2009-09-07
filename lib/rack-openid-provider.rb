@@ -290,8 +290,6 @@ module Rack # :nodoc:
       openid = open_id_params(req.params)
       env['openid.provider.req'] = openid
       env['openid.provider.options'] = @options
-
-      return @default.call(env) if not openid['ns'] == OpenID::NS
       clean_handles
 
       case openid['mode']
