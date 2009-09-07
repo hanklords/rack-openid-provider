@@ -23,6 +23,8 @@ module OpenID
 
   NS="http://specs.openid.net/auth/2.0".freeze
   IDENTIFIER_SELECT="http://specs.openid.net/auth/2.0/identifier_select".freeze
+  SERVER="http://specs.openid.net/auth/2.0/server".freeze
+  SIGN_ON="http://specs.openid.net/auth/2.0/signon".freeze
 
   class << self
     # Implements \OpenID btwoc function
@@ -188,14 +190,17 @@ module Rack # :nodoc:
 </xrds:XRDS>
 }.freeze
 
-      def initialize(options)
-        @content = DEFAULT_YADIS % [
-          options["Type"].map {|t| "<Type>" + t + "</Type>\n"}, 
-          options["URI"].map {|u| "<URI>" + u + "</URI>\n"}
+      def initialize(options = {"Type" => OpenID::SERVER, "URI" => true}); @options = options end
+      def call(env); [200, {"Content-Type" => "application/xrds+xml"}, [content] ] end
+
+      def content(env)
+        types, uris = @options["Type"], @options["URI"]
+        uris = [Request.new(env).url.sub(/\/xrds$/, '')] if uris == true
+        DEFAULT_YADIS % [
+          types.map {|t| "<Type>" + t + "</Type>\n"}, 
+          uris.map {|u| "<URI>" + u + "</URI>\n"}
         ]
       end
-
-      def call(env); [200, {"Content-Type" => "application/xrds+xml"}, [@content] ] end
     end
 
     # You should include this module in your Rack application like this:
