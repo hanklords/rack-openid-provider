@@ -201,6 +201,7 @@ module Rack
     include Utils
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
+      'private_handle_timeout' => 300,
       'nonce_timeout' => 300,
       'checkid_immediate' => false,
       'pass_not_openid' => false
