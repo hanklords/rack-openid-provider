@@ -106,6 +106,35 @@ class TestCheckId < Test::Unit::TestCase
     assert_equal "false", openid2["openid.is_valid"]
   end
 
+  def test_associate_bad
+    # Bad assoc / session combination
+    post "/", 
+      "openid.ns" => OpenID::NS,
+      "openid.mode" => "associate",
+      "openid.assoc_type" => "HMAC-SHA1",
+      "openid.session_type" =>"DH-SHA256",
+      "openid.dh_consumer_public" => "KEY"
+
+    assert last_response.client_error?
+    openid = OpenID.kv_decode last_response.body
+    assert_equal OpenID::NS, openid["openid.ns"]
+    assert_equal "error", openid["openid.mode"]
+    assert_not_nil openid["openid.error"]
+
+    # No public key
+    post "/", 
+      "openid.ns" => OpenID::NS,
+      "openid.mode" => "associate",
+      "openid.assoc_type" => "HMAC-SHA256",
+      "openid.session_type" =>"DH-SHA256"
+
+    assert last_response.client_error?
+    openid = OpenID.kv_decode last_response.body
+    assert_equal OpenID::NS, openid["openid.ns"]
+    assert_equal "error", openid["openid.mode"]
+    assert_not_nil openid["openid.error"]
+  end
+
   def test_associate
     private_key, public_key = OpenID::DH::SHA256.generate_pair
 
