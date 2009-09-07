@@ -47,8 +47,11 @@ class YesProvider
 end
 
 builder = Rack::Builder.new {
-  use Rack::OpenIDProvider
-  run YesProvider.new
+  map "/xrds" do run Rack::OpenIDProvider::YadisServe.new end
+  map "/" do
+    use Rack::OpenIDProvider
+    run YesProvider.new
+  end
 }
 
 desc "Setup a test OpenID Provider"
