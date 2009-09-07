@@ -175,6 +175,28 @@ module Rack # :nodoc:
   #     run MyProvider.new
   #   }
   class OpenIDProvider
+    class YadisServe
+      DEFAULT_YADIS = %{
+<?xml version="1.0" encoding="UTF-8"?>
+<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
+<XRD>
+  <Service priority="0">
+    %s
+    %s
+  </Service>
+</XRD>
+</xrds:XRDS>
+}.freeze
+
+      def initialize(options)
+        @content = DEFAULT_YADIS % [
+          options["Type"].map {|t| "<Type>" + t + "</Type>\n"}, 
+          options["URI"].map {|u| "<URI>" + u + "</URI>\n"}
+        ]
+      end
+
+      def call(env); [200, {"Content-Type" => "application/xrds+xml"}, [@content] ] end
+    end
 
     # You should include this module in your Rack application like this:
     #  class MyProvider
@@ -286,18 +308,6 @@ module Rack # :nodoc:
       'checkid_immediate' => false,
       'no_openid' => no_openid
     }
-
-    DEFAULT_YADIS = %{
-<?xml version="1.0" encoding="UTF-8"?>
-<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
-<XRD>
-  <Service priority="0">
-    <Type>http://specs.openid.net/auth/2.0/server</Type>
-    <URI>%s</URI>
-  </Service>
-</XRD>
-</xrds:XRDS>
-}
 
     def initialize(app, options = {})
       @app = app
