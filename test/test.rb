@@ -29,7 +29,7 @@ class TestOptions < Test::Unit::TestCase
 
   def app
     Rack::Builder.new {
-      use Rack::OpenIDProvider, {"contact" => "maelclerambault@yahoo.fr", "reference" => "No reference"}
+      use Rack::OpenIDProvider, {"contact" => "me@example.org", "reference" => "No reference"}
       run NoProvider.new
     }.to_app
   end
