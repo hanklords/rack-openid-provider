@@ -18,6 +18,19 @@ require 'openssl'
 require 'time'
 require 'uri'
 
+
+#if RUBY_VERSION < "1.9"
+class Integer
+  def ord; self; end unless 0.respond_to?(:ord)
+end
+
+class String
+  unless "".respond_to? :bytes
+    require 'enumerator'
+    def bytes; self.to_enum(:each_byte) end
+  end
+end
+
 module OpenID
   VERSION="0.0"
 
