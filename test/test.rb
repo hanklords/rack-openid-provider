@@ -26,6 +26,33 @@ DEFAULT_REQUEST = {
   "openid.assoc_handle" => "INVALIDHANDLE"
 }
 
+class TestOptions < Test::Unit::TestCase
+  include Rack::Test::Methods
+
+  def app
+    Rack::Builder.new {
+      use Rack::OpenIdProvider, {"contact" => "maelclerambault@yahoo.fr", "reference" => "No reference"}
+      run NoProvider.new
+    }.to_app
+  end
+
+  def test_contact_reference_option
+    # Bad assoc / session combination
+    post "/", 
+      "openid.ns" => OpenID::NS,
+      "openid.mode" => "associate",
+      "openid.assoc_type" => "HMAC-SHA1",
+      "openid.session_type" =>"DH-SHA256"
+
+    assert last_response.client_error?
+    openid = OpenID.kv_decode last_response.body
+    assert_equal OpenID::NS, openid["openid.ns"]
+    assert_equal "error", openid["openid.mode"]
+    assert_equal "maelclerambault@yahoo.fr", openid["openid.contact"]
+    assert_equal "No reference", openid["openid.reference"]
+  end
+end
+
 class TestNo < Test::Unit::TestCase
   include Rack::Test::Methods
 
