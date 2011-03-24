@@ -265,7 +265,7 @@ module Rack # :nodoc:
     end
 
     private
-    def redirect_res(env, h) # :nodoc:
+    def redirect_res(env, h)
       if d = self[env, 'return_to']
         d = URI(d)
         d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
@@ -275,7 +275,7 @@ module Rack # :nodoc:
       end
     end
 
-    def gen_htmlform(env, h) # :nodoc:
+    def gen_htmlform(env, h)
       if d = Rack::Utils.escape(self[env, 'return_to'])
         form = "<form name='openid_form' method='post' action='#{d}'>"
         form << gen_html_fields(h)
@@ -285,7 +285,7 @@ module Rack # :nodoc:
       end
     end
     
-    def gen_pos(env, params = {}) # :nodoc:
+    def gen_pos(env, params = {})
       raise NoReturnTo if self[env, 'return_to'].nil?
       assoc_handle = self[env, 'assoc_handle']
       mac = @handles[assoc_handle]
@@ -313,7 +313,7 @@ module Rack # :nodoc:
       r
     end
 
-    def gen_neg(env, params = {}) # :nodoc:
+    def gen_neg(env, params = {})
       if self[env, 'mode'] == "checkid_immediate"
         params.merge "ns" => OpenID::NS, "mode" => "setup_needed"
       else
@@ -321,7 +321,7 @@ module Rack # :nodoc:
       end
     end
 
-    def gen_error(env, error, params = {}) # :nodoc:
+    def gen_error(env, error, params = {})
       error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => error}
       error_res["contact"] = @options["contact"] if @options["contact"]
       error_res["reference"] = @options["reference"] if @options["reference"]
