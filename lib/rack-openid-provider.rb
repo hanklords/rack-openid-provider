@@ -18,19 +18,6 @@ require 'openssl'
 require 'time'
 require 'uri'
 
-
-#if RUBY_VERSION < "1.9"
-class Integer
-  def ord; self; end unless 0.respond_to?(:ord)
-end
-
-class String
-  unless "".respond_to? :bytes
-    require 'enumerator'
-    def bytes; self.to_enum(:each_byte) end
-  end
-end
-
 module OpenID
   VERSION="0.0"
 
@@ -211,115 +198,13 @@ module Rack # :nodoc:
       end
     end
 
-    # You should include this module in your Rack application like this:
-    #  class MyProvider
-    #    include Rack::OpenIDProvider::Utils
-    #    
-    #    def call(env)
-    #      ... do stuff ...
-    #    end
-    #  end
-    module Utils
-      class NoReturnToRedirect < StandardError # :nodoc:
-      end
-      class NoIdentity < StandardError # :nodoc:
-      end
-
-      # Positive assertion by HTTP redirect
-      def redirect_positive(env, params = {}); redirect_res env, gen_pos(env, params) end
-
-      # Negative assertion by HTTP redirect
-      def redirect_negative(env, params = {}); redirect_res env, gen_neg(env, params) end
-
-      # Error response by HTTP redirect
-      def redirect_error(env, error, params = {}); redirect_res env, gen_error(env, error, params) end
-      
-      def redirect_res(env, h) # :nodoc:
-        openid = env['openid.provider.req']
-        if d = URI(openid['return_to'])
-          d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
-          [301, {'Location' => d.to_s}, []]
-        else
-          raise NoReturnToRedirect
-        end
-      end
-
-      # Generate a positive assertion HTML form
-      def positive_htmlform(env, params= {}); gen_htmlform env, gen_pos(env, params) end
-
-      # Generate a negative assertion HTML form
-      def negative_htmlform(env, params= {}); gen_htmlform env, gen_neg(env, params) end
-
-      # Generate an error HTML form
-      def error_htmlform(env, error, params = {}); gen_htmlform env, gen_error(env, error, params) end
-
-      def gen_htmlform(env, h) # :nodoc:
-        openid = env['openid.provider.req']
-        if d = Rack::Utils.escape(openid['return_to'])
-          form = "<form name='openid_form' method='post' action='#{d}'>"
-          h.each {|k,v| form << "<input type='hidden' name='openid.#{Rack::Utils.escape k}' value='#{Rack::Utils.escape v}' />"}
-          form << "<input type='submit' /></form>"
-        else
-          raise NoReturnToRedirect
-        end
-      end
-
-      def gen_pos(env, params = {}) # :nodoc:
-        if params["claimed_id"] == OpenID::IDENTIFIER_SELECT or
-            params["identity"] == OpenID::IDENTIFIER_SELECT
-          raise NoIdentity
-        end
-
-        openid = env['openid.provider.req']
-        invalidate_handle = env['openid.provider.invalidate_handle']
-        assoc_handle = env['openid.provider.assoc_handle']
-        mac = env['openid.provider.mac']
-        nonce = env['openid.provider.nonce']
-        options = env['openid.provider.options']
-        r = params.merge(
-          "ns" => OpenID::NS,
-          "mode" => "id_res",
-          "op_endpoint" => options['op_endpoint'] || Request.new(env).url,
-          "return_to" => openid['return_to'],
-          "response_nonce" => nonce,
-          "assoc_handle" => assoc_handle
-        )
-        r["invalidate_handle"] = invalidate_handle if invalidate_handle
-        if not r["signed"]
-          r["signed"] = "op_endpoint,return_to,assoc_handle,response_nonce"
-          r["signed"] << ",identity,claimed_id" if r["identity"] and r["claimed_id"]
-        end
-        r["sig"] = OpenID.gen_sig(mac, r)
-        r
-      end
-
-      def gen_neg(env, params = {}) # :nodoc:
-        openid = env['openid.provider.req']
-        if openid['mode'] == "checkid_immediate"
-          params.merge "ns" => OpenID::NS, "mode" => "setup_needed"
-        else
-          params.merge "ns" => OpenID::NS, "mode" => "cancel"
-        end
-      end
-
-      def gen_error(env, error, params = {}) # :nodoc:
-        options = env['openid.provider.options']
-        error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => error}
-        error_res["contact"] = options["contact"] if options["contact"]
-        error_res["reference"] = options["reference"] if options["reference"]
-        error_res.merge(params)
-      end
-    end
-
-    include Utils
-    no_openid = lambda {|env| [400, {"Content-Type" => "text/plain"}, ["Invalid OpenID Request"]]}
+    class NoReturnTo < StandardError; end
 
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
       'nonce_timeout' => 300,
-      'checkid_immediate' => false,
-      'no_openid' => no_openid
+      'checkid_immediate' => false
     }
 
     def initialize(app, options = {})
@@ -330,44 +215,131 @@ module Rack # :nodoc:
 
     def call(env)
       req = Request.new(env)
-      openid = open_id_params(req.params)
-      env['openid.provider.req'] = openid
-      env['openid.provider.options'] = @options
+      env['openid.provider.params'] = open_id_params(req.params)
+      env['openid.provider'] = self
       clean_handles
 
-      case openid['mode']
+      case self[env, 'mode']
       when 'associate'
-        associate(env, openid)
+        associate(env)
       when 'checkid_immediate'
-        if @options['checkid_immediate']
-          checkid(env, openid)
-          @app.call(env)
-        else
-          redirect_negative(env)
-        end
+        checkid_immediate(env)
       when 'checkid_setup'
-        checkid(env, openid)
-        @app.call(env)
+        checkid_setup(env)
       when 'check_authentication'
-        check_authentication(env, openid)
+        check_authentication(env)
+      when  nil
+        env['openid.provider'] = nil
+        env['openid.provider.params'] = nil
+        default(env)
       else
-        s,h,b = (@options['no_openid'] || @app).call(env)
-        h['X-XRDS-Location'] = @options['xrds_location'] if @options['xrds_location']
-        [s,h,b]
+        default(env)
       end
     end
 
+    def params(env); env['openid.provider.params'] end
+    def [](env, k); params(env)[k] end
+    
+    # Positive assertion by HTTP redirect
+    def redirect_positive(env, params = {}); redirect_res env, gen_pos(env, params) end
+
+    # Negative assertion by HTTP redirect
+    def redirect_negative(env, params = {}); redirect_res env, gen_neg(env, params) end
+
+    # Error response by HTTP redirect
+    def redirect_error(env, error, params = {}); redirect_res env, gen_error(env, error, params) end
+
+    # Generate a positive assertion HTML form
+    def positive_htmlform(env, params= {}); gen_htmlform env, gen_pos(env, params) end
+
+    # Generate a negative assertion HTML form
+    def negative_htmlform(env, params= {}); gen_htmlform env, gen_neg(env, params) end
+
+    # Generate an error HTML form
+    def error_htmlform(env, error, params = {}); gen_htmlform env, gen_error(env, error, params) end
+    
+    def gen_html_fields(h)
+      h.map {|k,v|
+        "<input type='hidden' name='openid.#{Rack::Utils.escape(k)}' value='#{Rack::Utils.escape(v)}' />"
+      }.join("\n")
+    end
+
     private
+    def redirect_res(env, h) # :nodoc:
+      if d = self[env, 'return_to']
+        d = URI(d)
+        d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
+        [301, {'Location' => d.to_s}, []]
+      else
+        raise NoReturnTo
+      end
+    end
+
+    def gen_htmlform(env, h) # :nodoc:
+      if d = Rack::Utils.escape(self[env, 'return_to'])
+        form = "<form name='openid_form' method='post' action='#{d}'>"
+        form << gen_html_fields(h)
+        form << "<input type='submit' /></form>"
+      else
+        raise NoReturnTo
+      end
+    end
+    
+    def gen_pos(env, params = {}) # :nodoc:
+      raise NoReturnTo if self[env, 'return_to'].nil?
+      assoc_handle = self[env, 'assoc_handle']
+      mac = @handles[assoc_handle]
+      if mac.nil? # Generate a mac and invalidate the association handle
+        invalidate_handle = assoc_handle
+        mac = OpenID::Signatures["HMAC-SHA256"].gen_mac
+        @private_handles[assoc_handle = gen_handle] = mac
+      end
+      @nonces[nonce = gen_nonce] = assoc_handle
+      
+      r = params.merge(
+        "ns" => OpenID::NS,
+        "mode" => "id_res",
+        "op_endpoint" => @options['op_endpoint'] || Request.new(env).url,
+        "return_to" => self[env, 'return_to'],
+        "response_nonce" => nonce,
+        "assoc_handle" => assoc_handle
+      )
+      r["invalidate_handle"] = invalidate_handle if invalidate_handle
+      if not r["signed"]
+        r["signed"] = "op_endpoint,return_to,assoc_handle,response_nonce"
+        r["signed"] << ",identity,claimed_id" if r["identity"] and r["claimed_id"]
+      end
+      r["sig"] = OpenID.gen_sig(mac, r)
+      r
+    end
+
+    def gen_neg(env, params = {}) # :nodoc:
+      if self[env, 'mode'] == "checkid_immediate"
+        params.merge "ns" => OpenID::NS, "mode" => "setup_needed"
+      else
+        params.merge "ns" => OpenID::NS, "mode" => "cancel"
+      end
+    end
+
+    def gen_error(env, error, params = {}) # :nodoc:
+      error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => error}
+      error_res["contact"] = @options["contact"] if @options["contact"]
+      error_res["reference"] = @options["reference"] if @options["reference"]
+      error_res.merge(params)
+    end
+       
     def clean_handles; end
     
-    def associate(env, openid)
-      dh_modulus, dh_gen, dh_consumer_public = openid['dh_modulus'], openid['dh_gen'], openid['dh_consumer_public']
+    # OpenID handlers
+      
+    def associate(env)
+      dh_modulus, dh_gen, dh_consumer_public = self[env, 'dh_modulus'], self[env, 'dh_gen'], self[env, 'dh_consumer_public']
       p = dh_modulus && OpenID.ctwob(OpenID.base64_decode(dh_modulus))
       g = dh_gen && OpenID.ctwob(OpenID.base64_decode(dh_gen))
       consumer_public_key = dh_consumer_public && OpenID.ctwob(OpenID.base64_decode(dh_consumer_public))
 
-      session_type = OpenID::DH[openid['session_type']]
-      assoc_type = OpenID::Signatures[openid['assoc_type']]
+      session_type = OpenID::DH[self[env, 'session_type']]
+      assoc_type = OpenID::Signatures[self[env, 'assoc_type']]
 
       if session_type.nil? or assoc_type.nil?
         return direct_error(env, "session type or association type not supported", "error_code" => "unsupported-type")
@@ -379,8 +351,8 @@ module Rack # :nodoc:
       handle = gen_handle
       r = {
         "assoc_handle" => handle,
-        "session_type" => openid['session_type'],
-        "assoc_type" => openid['assoc_type'],
+        "session_type" => self[env, 'session_type'],
+        "assoc_type" => self[env, 'assoc_type'],
         "expires_in" => @options['handle_timeout']
       }
       
@@ -393,28 +365,30 @@ module Rack # :nodoc:
       @handles[handle] = mac
       direct_response env, r
     end
-
-    def checkid(env, openid)
-      assoc_handle = openid['assoc_handle']
-      if mac = @handles[assoc_handle]
-        env['openid.provider.assoc_handle'] = assoc_handle
-        env['openid.provider.mac'] = mac
+    
+    def checkid_immediate(env)
+      if @options['checkid_immediate']
+        @app.call(env)
       else
-        env['openid.provider.invalidate_handle'] = assoc_handle
-        env['openid.provider.assoc_handle'] = assoc_handle = gen_handle
-        env['openid.provider.mac'] = @private_handles[assoc_handle] = OpenID::Signatures["HMAC-SHA256"].gen_mac
+        redirect_negative(env)
       end
-      env['openid.provider.nonce'] = nonce = gen_nonce
-      @nonces[nonce] = assoc_handle
     end
     
-    def check_authentication(env, openid)
-      assoc_handle = openid['assoc_handle']
-      invalidate_handle = openid['invalidate_handle']
-      nonce = openid['response_nonce']
+    def checkid_setup(env)
+      @app.call(env)
+    end
+    
+    def default(env)
+      @app.call(env)
+    end
+    
+    def check_authentication(env)
+      assoc_handle = self[env, 'assoc_handle']
+      invalidate_handle = self[env, 'invalidate_handle']
+      nonce = self[env, 'response_nonce']
 
       # Check if assoc_handle, nonce and signature are valid. Then delete the response nonce
-      if mac = @private_handles[assoc_handle] and @nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, openid) == openid['sig']
+      if mac = @private_handles[assoc_handle] and @nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, params(env)) == self[env, 'sig']
         r = {"is_valid" => "true"}
         r["invalidate_handle"] = invalidate_handle if invalidate_handle && @handles[invalidate_handle].nil?
         direct_response  env, r

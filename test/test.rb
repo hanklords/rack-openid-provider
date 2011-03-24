@@ -3,16 +3,14 @@ require "rack/test"
 require "rack-openid-provider"
 
 class YesProvider
-  include Rack::OpenIDProvider::Utils
   def call(env)
-    openid = env['openid.provider.req']
-    redirect_positive(env, 'claimed_id' => openid['claimed_id'], 'identity' => openid['identity'] )
+    openid = env['openid.provider']
+    openid.redirect_positive(env, 'claimed_id' => openid[env, 'claimed_id'], 'identity' => openid[env, 'identity'] )
   end
 end
 
 class NoProvider
-  include Rack::OpenIDProvider::Utils
-  def call(env); redirect_negative(env) end
+  def call(env); env['openid.provider'].redirect_negative(env) end
 end
 
 DEFAULT_REQUEST = {
@@ -81,11 +79,6 @@ class TestNo < Test::Unit::TestCase
     assert_equal OpenID::NS, openid["openid.ns"]
     assert_equal "false", openid["openid.is_valid"]
     assert_nil openid["openid.invalidate_handle"]
-  end
-
-  def test_default
-    get "/"
-    assert last_response.client_error?
   end
 end
 

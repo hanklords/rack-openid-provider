@@ -1,11 +1,12 @@
 # -*- encoding: utf-8 -*-
 
+$: << File.dirname(__FILE__) + "/lib"
 require 'rake/rdoctask'
 require 'rake/packagetask'
 require 'rake/gempackagetask'
 require 'rake/testtask'
 
-require 'lib/rack-openid-provider'
+require 'rack-openid-provider'
 
 PKG_FILES = FileList["lib/rack-openid-provider.rb", "LICENSE", "rakefile", "test/*.rb"].to_a
 
@@ -39,7 +40,6 @@ end
 
 # Test Provider
 class YesProvider
-  include Rack::OpenIDProvider::Utils
   def call(env)
     openid = env['openid.provider.req']
     redirect_positive(env, 'claimed_id' => openid['claimed_id'], 'identity' => openid['identity'] )
