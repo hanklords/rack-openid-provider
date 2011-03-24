@@ -171,7 +171,7 @@ end
 
 
 module Rack # :nodoc:
-  # This is a Rack middleware, use it as such:
+  # This is a Rack middleware:
   #   Rack::Builder.new {
   #     use Rack::OpenIDProvider, custom_options
   #     run MyProvider.new
@@ -183,18 +183,26 @@ module Rack # :nodoc:
 <xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
 <XRD>
   <Service priority="0">
-%s
-  </Service>
+%s</Service>
 </XRD>
 </xrds:XRDS>
 }.freeze
+      NOT_FOUND = [404, {"Content-Type" => "text/plain"}, "Not Found"].freeze
 
-      def initialize(options = {"Type" => [OpenID::SERVER], "URI" => true}); @options = options end
-      def call(env); [200, {"Content-Type" => "application/xrds+xml"}, [DEFAULT_YADIS % [content(env)]] ] end
+      def initialize(options = {"Type" => OpenID::SERVER, "URI" => "/"}); @options = options end
 
-      def content(env)
-        @options["URI"] = [Request.new(env).url.sub(/\/xrds$/, '')] if @options["URI"] == true
-        @options.map {|k,v| v.map {|t| "    <"+k+">"+t+"</"+k+">"}.join("\n")}.join("\n")
+      def call(env)
+        r = Request.new(env)
+        return NOT_FOUND if not r.path == r.script_name
+        
+        fragment = @options.map { |k,v|
+          v = [v] if not v.respond_to? :map
+          v.map { |t|
+            t = URI.join(r.url, t) if k == "URI" and URI(t).relative?
+            "    <#{k}>#{t}</#{k}>\n"
+          }.join
+        }.join
+        [200, {"Content-Type" => "application/xrds+xml"}, [DEFAULT_YADIS % [fragment]] ]
       end
     end
 
