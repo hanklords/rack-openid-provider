@@ -236,10 +236,6 @@ module Rack # :nodoc:
         checkid_setup(env)
       when 'check_authentication'
         check_authentication(env)
-      when  nil
-        env['openid.provider'] = nil
-        env['openid.provider.params'] = nil
-        default(env)
       else
         default(env)
       end
