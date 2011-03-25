@@ -390,8 +390,7 @@ module Rack # :nodoc:
       if @options['checkid_immediate']
         @app.call(env)
       else
-        req = OpenIDRequest.new(env)
-        req.redirect_negative
+        OpenIDRequest.new(env).redirect_negative
       end
     end
     
