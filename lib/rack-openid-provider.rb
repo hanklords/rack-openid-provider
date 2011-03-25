@@ -247,7 +247,8 @@ module Rack # :nodoc:
 
     def params(env); env['openid.provider.params'] end
     def [](env, k); params(env)[k] end
-    
+    def []=(env, k, v); params(env)[k] = v end
+
     # Positive assertion by HTTP redirect
     def redirect_positive(env, params = {}); redirect_res env, gen_pos(env, params) end
 
@@ -295,6 +296,7 @@ module Rack # :nodoc:
     
     def gen_pos(env, params = {})
       raise NoReturnTo if self[env, 'return_to'].nil?
+      
       assoc_handle = self[env, 'assoc_handle']
       mac = @handles[assoc_handle]
       if mac.nil? # Generate a mac and invalidate the association handle
