@@ -179,10 +179,6 @@ module Rack # :nodoc:
       @env = env
     end
 
-    def nonces; @env['openid.provider.nonces'] end
-    def handles; @env['openid.provider.handles'] end
-    def private_handles; @env['openid.provider.private_handles'] end
-    def options; @env['openid.provider.options'] end
     def params; @env['openid.provider.request.params'] ||= extract_open_id_params end
     def [](k); params[k] end
     def []=(k, v); params[k] = v end
@@ -212,6 +208,11 @@ module Rack # :nodoc:
     end
     
     private
+    def nonces; @env['openid.provider.nonces'] end
+    def handles; @env['openid.provider.handles'] end
+    def private_handles; @env['openid.provider.private_handles'] end
+    def options; @env['openid.provider.options'] end
+    
     def extract_open_id_params
       openid_params = {}
       Request.new(@env).params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
