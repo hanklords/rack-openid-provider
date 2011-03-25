@@ -6,7 +6,7 @@ require 'rake/packagetask'
 require 'rake/gempackagetask'
 require 'rake/testtask'
 
-require 'rack-openid-provider'
+require 'rack/openid-provider'
 
 PKG_FILES = FileList["lib/rack-openid-provider.rb", "LICENSE", "rakefile", "test/*.rb"].to_a
 

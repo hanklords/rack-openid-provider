@@ -1,6 +1,6 @@
 require "test/unit"
 require "rack/test"
-require "rack-openid-provider"
+require "rack/openid-provider"
 
 class YesProvider
   def call(env)
