@@ -225,6 +225,7 @@ module Rack # :nodoc:
       req = Request.new(env)
       env['openid.provider.params'] = open_id_params(req.params)
       env['openid.provider'] = self
+      self[env, 'mode'] = nil if not req.path_info == "/"
       clean_handles
 
       case self[env, 'mode']
