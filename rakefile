@@ -37,24 +37,3 @@ task :spec do
   spec_clone.test_files = nil
   open("rack-openid-provider.gemspec", "w") {|g| g.puts spec_clone.to_ruby }
 end
-
-# Test Provider
-class YesProvider
-  def call(env)
-    openid = env['openid.provider.req']
-    redirect_positive(env, 'claimed_id' => openid['claimed_id'], 'identity' => openid['identity'] )
-  end
-end
-
-builder = Rack::Builder.new {
-  map "/xrds" do run Rack::OpenIDProvider::YadisServe.new end
-  map "/" do
-    use Rack::OpenIDProvider
-    run YesProvider.new
-  end
-}
-
-desc "Setup a test OpenID Provider"
-task :provider do
-  Rack::Handler::WEBrick.run builder, :Port => 9292
-end

@@ -4,13 +4,13 @@ require "rack-openid-provider"
 
 class YesProvider
   def call(env)
-    openid = env['openid.provider']
-    openid.redirect_positive(env, 'claimed_id' => openid[env, 'claimed_id'], 'identity' => openid[env, 'identity'] )
+    req = Rack::OpenIDRequest.new(env)
+    req.redirect_positive('claimed_id' => req['claimed_id'], 'identity' => req['identity'] )
   end
 end
 
 class NoProvider
-  def call(env); env['openid.provider'].redirect_negative(env) end
+  def call(env); Rack::OpenIDRequest.new(env).redirect_negative end
 end
 
 DEFAULT_REQUEST = {
