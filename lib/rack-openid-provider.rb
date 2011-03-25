@@ -177,7 +177,6 @@ module Rack # :nodoc:
   #     run MyProvider.new
   #   }
   class OpenIDProvider
-    class YadisServe
       DEFAULT_YADIS =
 %{<?xml version="1.0" encoding="UTF-8"?>
 <xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
@@ -187,23 +186,13 @@ module Rack # :nodoc:
 </XRD>
 </xrds:XRDS>
 }.freeze
-      NOT_FOUND = [404, {"Content-Type" => "text/plain"}, "Not Found"].freeze
 
-      def initialize(options = {"Type" => OpenID::SERVER, "URI" => "/"}); @options = options end
-
-      def call(env)
-        r = Request.new(env)
-        return NOT_FOUND if not r.path == r.script_name
-        
-        fragment = @options.map { |k,v|
-          v = [v] if not v.respond_to? :map
-          v.map { |t|
-            t = URI.join(r.url, t) if k == "URI" and URI(t).relative?
-            "    <#{k}>#{t}</#{k}>\n"
-          }.join
-        }.join
-        [200, {"Content-Type" => "application/xrds+xml"}, [DEFAULT_YADIS % [fragment]] ]
-      end
+    def self.yadis(service)
+      fragment = service.map { |k,v|
+        v = [v] if not v.respond_to? :map
+        v.map { |t| "    <#{k}>#{t}</#{k}>\n" }.join
+      }.join
+      [200, {"Content-Type" => "application/xrds+xml"}, [DEFAULT_YADIS % [fragment]] ]
     end
 
     class NoReturnTo < StandardError; end
