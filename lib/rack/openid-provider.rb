@@ -27,7 +27,7 @@ module OpenID
   SIGNON="http://specs.openid.net/auth/2.0/signon".freeze
 
   class << self
-    # Implements \OpenID btwoc function
+    # Implements OpenID btwoc function
     def btwoc(n)
       n = n.to_i
       raise if n < 0
@@ -46,13 +46,13 @@ module OpenID
       n
     end
 
-    # Encode \OpenID parameters as a HTTP GET query string
+    # Encode OpenID parameters as a HTTP GET query string
     def url_encode(h); h.map { |k,v| "openid.#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
 
-    # Encode \OpenID parameters as Key-Value format
+    # Encode OpenID parameters as Key-Value format
     def kv_encode(h); h.map {|k,v| k.to_s + ":" + v.to_s + 10.chr }.join end
 
-    # Decode \OpenID parameters from Key-Value format
+    # Decode OpenID parameters from Key-Value format
     def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
 
     # Encode in base64
@@ -67,7 +67,7 @@ module OpenID
     # Generate a random string _length_ long
     def random_string(length); random_bytes(length / 2).unpack("H*")[0] end
 
-    # Generate an \OpenID signature
+    # Generate an OpenID signature
     def gen_sig(mac, params)
       signed = params["signed"].split(",").map {|k| [k, params[k]]}
       if mac.length == 20
@@ -82,36 +82,34 @@ module OpenID
   end
 
   module Signatures # :nodoc: all
-    def self.[](name)
-      @assocs ||= Hash[*constants.map {|c|
-        a = const_get(c)
-        [a.assoc, a] if a.respond_to? :assoc
-      }.compact.flatten]
-      @assocs[name]
-    end
-
+    Associations = {}
+    def self.[](k); Associations[k] end
+    def self.[]=(k, v); Associations[k] = v end
+      
     class Assoc
-      attr_reader :assoc
-      def initialize(assoc, digest); @assoc, @digest = assoc.freeze, digest end
+      def initialize(digest); @digest = digest end
       def sign(mac, value); OpenSSL::HMAC.digest(@digest.new, mac, value) end
       def size; @digest.new.size end
       def gen_mac; OpenID.random_bytes(size) end
     end
 
-    HMAC_SHA1 = Assoc.new "HMAC-SHA1", OpenSSL::Digest::SHA1
-    HMAC_SHA256 = Assoc.new "HMAC-SHA256", OpenSSL::Digest::SHA256
+    Associations["HMAC-SHA1"] = Assoc.new(OpenSSL::Digest::SHA1)
+    Associations["HMAC-SHA256"] = Assoc.new(OpenSSL::Digest::SHA256)
   end
 
   module DH # :nodoc: all
     DEFAULT_MODULUS=0xDCF93A0B883972EC0E19989AC5A2CE310E1D37717E8D9571BB7623731866E61EF75A2E27898B057F9891C2E27A639C3F29B60814581CD3B2CA3986D2683705577D45C2E7E52DC81C7A171876E5CEA74B1448BFDFAF18828EFD2519F14E45E3826634AF1949E5B535CC829A483B8A76223E5D490A257F05BDFF16F2FB22C583AB
     DEFAULT_GEN=2
+    
+    Sessions = {}
+    def self.[](k); Sessions[k] end
+    def self.[]=(k, v); Sessions[k] = v end    
 
     class SHA_ANY
       class MissingKey < StandardError; end
 
-      attr_reader :session_name
       def compatible_key_size?(size); @digest.new.size == size end
-      def initialize(session_name, digest); @session_name, @digest = session_name.freeze, digest end
+      def initialize(digest); @digest = digest end
 
       def to_hash(mac, p, g, consumer_public_key)
         raise MissingKey if consumer_public_key.nil?
@@ -139,28 +137,21 @@ module OpenID
       end
     end
 
-    SHA1   = SHA_ANY.new "DH-SHA1"  , OpenSSL::Digest::SHA1
-    SHA256 = SHA_ANY.new "DH-SHA256", OpenSSL::Digest::SHA256
-
     class NoEncryption
       def self.compatible_key_size?(size); true end
-      def self.session_name; "no-encryption" end
       def self.to_hash(mac, p, g, c); {"mac_key" => OpenID.base64_encode(mac)} end
     end
-
-    def self.[](name)
-      @sessions ||= Hash[*constants.map {|c|
-        s = const_get(c)
-        [s.session_name, s] if s.respond_to? :session_name
-      }.compact.flatten]
-      @sessions[name]
-    end
+    
+    Sessions["DH-SHA1"] = SHA_ANY.new(OpenSSL::Digest::SHA1)
+    Sessions["DH-SHA256"] = SHA_ANY.new(OpenSSL::Digest::SHA256)
+    Sessions["no-encryption"] = NoEncryption
   end
 end
 
 
 module Rack # :nodoc:
   class OpenIDRequest
+    MAX_REDIRECT_SIZE = 1024
     class NoReturnTo < StandardError; end
       
     def initialize(env)
@@ -178,27 +169,14 @@ module Rack # :nodoc:
     def session_type; OpenID::DH[params['session_type']] end
     def assoc_type; OpenID::Signatures[params['assoc_type']] end
       
-    # Positive assertion by HTTP redirect
-    def redirect_positive(h = {}); redirect_res gen_pos(h) end
-
-    # Negative assertion by HTTP redirect
-    def redirect_negative(h = {}); redirect_res gen_neg(h) end
-
-    # Error response by HTTP redirect
-    def redirect_error(error, h = {}); redirect_res gen_error(error, h) end
-
-    # Generate a positive assertion HTML form
-    def positive_htmlform(h= {}); gen_htmlform env, gen_pos(h) end
-
-    # Generate a negative assertion HTML form
-    def negative_htmlform(h= {}); gen_htmlform env, gen_neg(h) end
-
-    # Generate an error HTML form
-    def error_htmlform(error, h = {}); gen_htmlform gen_error(error, h) end
+    def return_positive(h = {}); return_response gen_pos(h) end
+    def return_negative(h = {}); return_response gen_neg(h) end
+    def return_error(error, h = {}); return_response gen_error(error, h) end
     
+
     def gen_html_fields(h)
       h.map {|k,v|
-        "<input type='hidden' name='openid.#{Rack::Utils.escape(k)}' value='#{Rack::Utils.escape(v)}' />"
+        "<input type='hidden' name='openid.#{k}' value='#{v}' />"
       }.join("\n")
     end
     
@@ -214,25 +192,28 @@ module Rack # :nodoc:
       openid_params
     end
     
-    def redirect_res(h)
-      p h
-      if d = params['return_to']
-        d = URI(d)
-        d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
-        [302, {'Location' => d.to_s, 'Content-Type' => "text/plain", 'Content-Length' => "0"}, [""]]
+    def redirect_res(return_to, h)
+      d = URI(return_to)
+      d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
+      [302, {'Location' => d.to_s, 'Content-Type' => "text/plain", 'Content-Length' => "0"}, [""]]
+    end
+    
+    def return_response(h)
+      return_to = params['return_to']
+      raise NoReturnTo if params['return_to'].nil?
+      
+      if OpenID.url_encode(h).size > MAX_REDIRECT_SIZE
+        gen_htmlform(return_to, h)
       else
-        raise NoReturnTo
+        redirect_res(return_to, h)
       end
     end
 
-    def gen_htmlform(h)
-      if d = Rack::Utils.escape(params['return_to'])
-        form = "<form name='openid_form' method='post' action='#{d}'>"
-        form << gen_html_fields(h)
-        form << "<input type='submit' /></form>"
-      else
-        raise NoReturnTo
-      end
+    def gen_htmlform(return_to, h)
+      body = "<html><body onload='this.openid_form.submit();'>"
+      body << "<form name='openid_form' method='post' action='#{return_to}'>"
+      body << gen_html_fields(h)
+      body << "<input type='submit' /></form></body></html>"
     end
     
     def gen_pos(h = {})
@@ -286,25 +267,6 @@ module Rack # :nodoc:
   #     run MyProvider.new
   #   }
   class OpenIDProvider
-      DEFAULT_YADIS =
-%{<?xml version="1.0" encoding="UTF-8"?>
-<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
-<XRD>
-  <Service priority="0">
-%s</Service>
-</XRD>
-</xrds:XRDS>
-}.freeze
-
-    def self.yadis(service)
-      fragment = service.map { |k,v|
-        v = [v] if not v.respond_to? :map
-        v.map { |t| "    <#{k}>#{t}</#{k}>\n" }.join
-      }.join
-      [200, {"Content-Type" => "application/xrds+xml"}, [DEFAULT_YADIS % [fragment]] ]
-    end
-
-
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
@@ -321,7 +283,7 @@ module Rack # :nodoc:
     def call(env)
       req = Request.new(env)
       openid_req = OpenIDRequest.new(env)
-      p openid_req.params
+      
       env['openid.provider.options'] = @options
       env['openid.provider.nonces'] = @nonces
       env['openid.provider.handles'] = @handles
@@ -385,7 +347,7 @@ module Rack # :nodoc:
       if @options['checkid_immediate']
         @app.call(env)
       else
-        OpenIDRequest.new(env).redirect_negative
+        OpenIDRequest.new(env).return_negative
       end
     end
     
@@ -395,7 +357,7 @@ module Rack # :nodoc:
       req = OpenIDRequest.new(env)
       error = "Unknown mode"
       if req['return_to'] # Indirect Request
-        req.redirect_error(error)
+        req.return_error(error)
       else # Direct Request
         direct_error(error)
       end
@@ -416,13 +378,8 @@ module Rack # :nodoc:
         direct_response "is_valid" => "false"
       end
     end
-
-    def gen_error(error, h = {})
-
-    end
     
     def direct_response(h)
-      p h
       body = OpenID.kv_encode(h.merge("ns" => OpenID::NS))
       [
         200,
@@ -438,6 +395,35 @@ module Rack # :nodoc:
       c,h,b = direct_response(error_res.merge(h))
       [400, h, b]
     end
+  end
+  
+  class Yadis
+    NOT_FOUND = "Not Found".freeze
+    CONTENT =
+%{<?xml version="1.0" encoding="UTF-8"?>
+<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
+<XRD>
+  <Service priority="0">
+%s</Service>
+</XRD>
+</xrds:XRDS>
+}.freeze
 
+    def initialize(service)
+      fragment = service.map { |k,v|
+        v = [v] if not v.respond_to? :map
+        v.map { |t| "    <#{k}>#{t}</#{k}>\n" }.join
+      }.join
+      @content = (CONTENT % [fragment]).freeze
+    end
+    
+    def call(env)
+      req = Request.new(env)
+      if req.path_info != "/" and req.path != "/"
+        [404, {"Content-Type" => "plain/text", "Content-Length" => NOT_FOUND.size.to_s}, [NOT_FOUND] ]
+      end
+      
+      [200, {"Content-Type" => "application/xrds+xml", "Content-Length" => @content.size.to_s}, [@content] ]
+    end
   end
 end
