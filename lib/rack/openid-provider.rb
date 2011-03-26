@@ -184,7 +184,14 @@ module Rack # :nodoc:
     def params; @env['openid.provider.request.params'] ||= extract_open_id_params end
     def [](k); params[k] end
     def []=(k, v); params[k] = v end
-
+      
+    # Some accessor helpers
+    def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
+    def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
+    def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
+    def session_type; OpenID::DH[params['session_type']] end
+    def assoc_type; OpenID::Signatures[params['assoc_type']] end
+      
     # Positive assertion by HTTP redirect
     def redirect_positive(h = {}); redirect_res gen_pos(h) end
 
@@ -358,21 +365,17 @@ module Rack # :nodoc:
     
     def associate(env)
       req = OpenIDRequest.new(env)
-      dh_modulus, dh_gen, dh_consumer_public = req['dh_modulus'], req['dh_gen'], req['dh_consumer_public']
-      p = dh_modulus && OpenID.ctwob(OpenID.base64_decode(dh_modulus))
-      g = dh_gen && OpenID.ctwob(OpenID.base64_decode(dh_gen))
-      consumer_public_key = dh_consumer_public && OpenID.ctwob(OpenID.base64_decode(dh_consumer_public))
+      p = req.dh_modulus
+      g = req.dh_gen
+      c = req.dh_consumer_public
 
-      session_type = OpenID::DH[req['session_type']]
-      assoc_type = OpenID::Signatures[req['assoc_type']]
-
-      if session_type.nil? or assoc_type.nil?
+      if req.session_type.nil? or req.assoc_type.nil?
         return direct_error("session type or association type not supported", "error_code" => "unsupported-type")
-      elsif not session_type.compatible_key_size?(assoc_type.size)
+      elsif not req.session_type.compatible_key_size?(req.assoc_type.size)
         return direct_error("session type and association type are incompatible")
       end
       
-      mac = assoc_type.gen_mac
+      mac = req.assoc_type.gen_mac
       handle = OpenID.gen_handle
       r = {
         "assoc_handle" => handle,
@@ -382,7 +385,7 @@ module Rack # :nodoc:
       }
       
       begin
-        r.update session_type.to_hash(mac, p, g, consumer_public_key)
+        r.update req.session_type.to_hash(mac, p, g, c)
       rescue OpenID::DH::SHA_ANY::MissingKey
         return direct_error("dh_consumer_public missing")
       end
