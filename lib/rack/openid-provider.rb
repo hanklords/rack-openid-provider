@@ -24,7 +24,7 @@ module OpenID
   NS="http://specs.openid.net/auth/2.0".freeze
   IDENTIFIER_SELECT="http://specs.openid.net/auth/2.0/identifier_select".freeze
   SERVER="http://specs.openid.net/auth/2.0/server".freeze
-  SIGN_ON="http://specs.openid.net/auth/2.0/signon".freeze
+  SIGNON="http://specs.openid.net/auth/2.0/signon".freeze
 
   class << self
     # Implements \OpenID btwoc function
@@ -49,7 +49,7 @@ module OpenID
     def url_encode(h); h.map { |k,v| "openid.#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
 
     # Encode \OpenID parameters as Key-Value format
-    def kv_encode(h); h.map {|k,v| "openid." + k.to_s + ":" + v.to_s + 10.chr }.join end
+    def kv_encode(h); h.map {|k,v| k.to_s + ":" + v.to_s + 10.chr }.join end
 
     # Decode \OpenID parameters from Key-Value format
     def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
@@ -175,6 +175,8 @@ end
 
 module Rack # :nodoc:
   class OpenIDRequest
+    class NoReturnTo < StandardError; end
+      
     def initialize(env)
       @env = env
     end
@@ -223,7 +225,7 @@ module Rack # :nodoc:
       if d = params['return_to']
         d = URI(d)
         d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
-        [301, {'Location' => d.to_s}, []]
+        [302, {'Location' => d.to_s, 'Content-Type' => "text/plain", 'Content-Length' => "0"}, [""]]
       else
         raise NoReturnTo
       end
@@ -254,7 +256,7 @@ module Rack # :nodoc:
       r = h.merge(
         "ns" => OpenID::NS,
         "mode" => "id_res",
-        "op_endpoint" => options['op_endpoint'] || Request.new(@env).url,
+        "op_endpoint" => options['op_endpoint'] || Request.new(@env.merge("QUERY_STRING" => "")).url,
         "return_to" => params['return_to'],
         "response_nonce" => nonce,
         "assoc_handle" => assoc_handle
@@ -277,7 +279,7 @@ module Rack # :nodoc:
     end
 
     def gen_error(error, h = {})
-      error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => h}
+      error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => error}
       error_res["contact"] = options["contact"] if options["contact"]
       error_res["reference"] = options["reference"] if options["reference"]
       error_res.merge(h)
@@ -308,7 +310,6 @@ module Rack # :nodoc:
       [200, {"Content-Type" => "application/xrds+xml"}, [DEFAULT_YADIS % [fragment]] ]
     end
 
-    class NoReturnTo < StandardError; end
 
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
@@ -326,6 +327,7 @@ module Rack # :nodoc:
     def call(env)
       req = Request.new(env)
       openid_req = OpenIDRequest.new(env)
+      p openid_req.params
       env['openid.provider.options'] = @options
       env['openid.provider.nonces'] = @nonces
       env['openid.provider.handles'] = @handles
@@ -342,8 +344,10 @@ module Rack # :nodoc:
         checkid_setup(env)
       when 'check_authentication'
         check_authentication(env)
-      else
+      when nil
         default(env)
+      else
+        unknown_mode(env)
       end
     end
 
@@ -395,14 +399,18 @@ module Rack # :nodoc:
       end
     end
     
-    def checkid_setup(env)
-      @app.call(env)
+    def checkid_setup(env); @app.call(env) end
+    def default(env); @app.call(env) end
+    def unknown_mode(env)
+      req = OpenIDRequest.new(env)
+      error = "Unknown mode"
+      if req['return_to'] # Indirect Request
+        req.redirect_error(error)
+      else # Direct Request
+        direct_error(error)
+      end
     end
-    
-    def default(env)
-      @app.call(env)
-    end
-    
+
     def check_authentication(env)
       req = OpenIDRequest.new(env)
       assoc_handle = req['assoc_handle']
@@ -420,26 +428,24 @@ module Rack # :nodoc:
     end
 
     def gen_error(error, h = {})
-      error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => h}
-      error_res["contact"] = @options["contact"] if @options["contact"]
-      error_res["reference"] = @options["reference"] if @options["reference"]
-      error_res.merge(h)
+
     end
     
     def direct_response(h)
+      body = OpenID.kv_encode(h.merge("ns" => OpenID::NS))
       [
         200,
-        {"Content-Type" => "text/plain"},
-        [OpenID.kv_encode(h.merge("ns" => OpenID::NS))]
+        {"Content-Type" => "text/plain", "Content-Length" => body.size.to_s},
+        [body]
       ]
     end
 
     def direct_error(error, h = {})
-      [
-        400,
-        {"Content-Type" => "text/plain"},
-        [OpenID.kv_encode(gen_error(error, h))]
-      ]
+      error_res = {"mode" => "error", "error" => error}
+      error_res["contact"] = @options["contact"] if @options["contact"]
+      error_res["reference"] = @options["reference"] if @options["reference"]
+      c,h,b = direct_response(error_res.merge(h))
+      [400, h, b]
     end
 
   end
