@@ -231,7 +231,7 @@ module Rack # :nodoc:
       r = h.merge(
         "ns" => OpenID::NS,
         "mode" => "id_res",
-        "op_endpoint" => options['op_endpoint'] || Request.new(@env.merge("QUERY_STRING" => "")).url,
+        "op_endpoint" => options['op_endpoint'] || Request.new(@env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url,
         "return_to" => params['return_to'],
         "response_nonce" => nonce,
         "assoc_handle" => assoc_handle
