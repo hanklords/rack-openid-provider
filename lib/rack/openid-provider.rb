@@ -135,8 +135,7 @@ module OpenID
 
       private
       def sxor(s1, s2)
-        # s1 = s1.to_enum(:each_byte); s2 = s2.to_enum(:each_byte)
-        s1.bytes.zip(s2.bytes).map { |x,y| (x^y).chr }.join
+        s1.bytes.zip(s2.bytes).map { |x,y| (x^y).chr }.pack('C*')
       end
 
       # x ** n % p
