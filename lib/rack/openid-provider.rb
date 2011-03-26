@@ -237,10 +237,10 @@ module Rack # :nodoc:
         "assoc_handle" => assoc_handle
       )
       r["invalidate_handle"] = invalidate_handle if invalidate_handle
-      if not r["signed"]
-        r["signed"] = "op_endpoint,return_to,assoc_handle,response_nonce"
-        r["signed"] << ",identity,claimed_id" if r["identity"] and r["claimed_id"]
-      end
+      r["signed"] ||= []
+      r["signed"] += %w{op_endpoint return_to assoc_handle response_nonce}
+      r["signed"] += %w{identity claimed_id} if r["identity"] and r["claimed_id"]
+      r["signed"] = r["signed"].join(",")
       r["sig"] = OpenID.gen_sig(mac, r)
       r
     end
