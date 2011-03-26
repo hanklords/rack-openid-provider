@@ -29,6 +29,7 @@ module OpenID
   class << self
     # Implements \OpenID btwoc function
     def btwoc(n)
+      n = n.to_i
       raise if n < 0
       r = (n % 0x100).chr
       r = (n % 0x100).chr + r while (n /= 0x100) > 0
@@ -70,9 +71,9 @@ module OpenID
     def gen_sig(mac, params)
       signed = params["signed"].split(",").map {|k| [k, params[k]]}
       if mac.length == 20
-        Signatures["HMAC-SHA1"].sign(  mac, kv_encode(signed))
+        OpenID.base64_encode(Signatures["HMAC-SHA1"].sign(  mac, kv_encode(signed)))
       else
-        Signatures["HMAC-SHA256"].sign(mac, kv_encode(signed))
+        OpenID.base64_encode(Signatures["HMAC-SHA256"].sign(mac, kv_encode(signed)))
       end
     end
     
@@ -91,10 +92,10 @@ module OpenID
 
     class Assoc
       attr_reader :assoc
-      def initialize(assoc, digest); @assoc, @digest = assoc.freeze, digest.new end
-      def sign(mac, value); OpenSSL::HMAC.new(mac, @digest.reset).update(value).to_s end
-      def size; @digest.size end
-      def gen_mac; OpenID.random_bytes(@digest.size) end
+      def initialize(assoc, digest); @assoc, @digest = assoc.freeze, digest end
+      def sign(mac, value); OpenSSL::HMAC.digest(@digest.new, mac, value) end
+      def size; @digest.new.size end
+      def gen_mac; OpenID.random_bytes(size) end
     end
 
     HMAC_SHA1 = Assoc.new "HMAC-SHA1", OpenSSL::Digest::SHA1
@@ -109,46 +110,32 @@ module OpenID
       class MissingKey < StandardError; end
 
       attr_reader :session_name
-      def compatible_key_size?(size); @digest.size == size end
-      def initialize(session_name, digest); @session_name, @digest = session_name.freeze, digest.new end
+      def compatible_key_size?(size); @digest.new.size == size end
+      def initialize(session_name, digest); @session_name, @digest = session_name.freeze, digest end
 
       def to_hash(mac, p, g, consumer_public_key)
         raise MissingKey if consumer_public_key.nil?
-        p ||= DEFAULT_MODULUS
-        g ||= DEFAULT_GEN
-        private_key, public_key = generate_pair(p,g)
-        shared = compute_shared(consumer_public_key, private_key, p)
-        shared_hashed = @digest.reset.update(OpenID.btwoc(shared)).digest
+        
+        c = OpenSSL::BN.new(consumer_public_key.to_s)
+        dh = gen_key(p || DEFAULT_MODULUS, g || DEFAULT_GEN)
+        shared = OpenSSL::BN.new(dh.compute_key(c), 2)
+        shared_hashed = @digest.digest(OpenID.btwoc(shared))
         {
-          "dh_server_public" => OpenID.base64_encode(OpenID.btwoc(public_key)),
+          "dh_server_public" => OpenID.base64_encode(OpenID.btwoc(dh.pub_key)),
           "enc_mac_key" => OpenID.base64_encode(sxor(shared_hashed, mac))
         }
       end
 
-      def compute_shared(pub, pri, p = DEFAULT_MODULUS); powermod(pub, pri, p) end
-
-      def generate_pair(p = DEFAULT_MODULUS, g = DEFAULT_GEN)
-        private_key = OpenID.random_string(p.to_s(16).size).to_i(16) % p
-        public_key = powermod(g, private_key, p)
-        [private_key, public_key]
-      end
-
       private
-      def sxor(s1, s2)
-        s1.bytes.zip(s2.bytes).map { |x,y| (x^y).chr }.pack('C*')
+      def gen_key(p, g)
+        dh = OpenSSL::PKey::DH.new
+        dh.p = p
+        dh.g = g
+        dh.generate_key!
       end
-
-      # x ** n % p
-      # Taken from http://blade.nagaokaut.ac.jp/cgi-bin/scat.rb/ruby/ruby-talk/19098
-      # by Eric Lee Green.
-      def powermod(x, n, q)
-        y=1
-        while n != 0
-          y=(y*x) % q if n[0]==1
-          n = n >> 1
-          x = (x ** 2) % q
-        end
-        y
+      
+      def sxor(s1, s2)
+        s1.bytes.zip(s2.bytes).map { |x,y| x^y }.pack('C*')
       end
     end
 
@@ -228,6 +215,7 @@ module Rack # :nodoc:
     end
     
     def redirect_res(h)
+      p h
       if d = params['return_to']
         d = URI(d)
         d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
@@ -434,6 +422,7 @@ module Rack # :nodoc:
     end
     
     def direct_response(h)
+      p h
       body = OpenID.kv_encode(h.merge("ns" => OpenID::NS))
       [
         200,
