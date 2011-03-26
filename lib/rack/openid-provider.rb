@@ -55,10 +55,10 @@ module OpenID
     def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
 
     # Encode in base64
-    def base64_encode(s); [s].pack("m").delete("\n") end
+    def base64_encode(s); [s].pack("m0") end
 
     # Decode from base64
-    def base64_decode(s); s.unpack("m").first end
+    def base64_decode(s); s.unpack("m0").first end
 
     # Generate _bytes_ random bytes
     def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes) end
