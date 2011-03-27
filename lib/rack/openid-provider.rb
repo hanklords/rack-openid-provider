@@ -157,8 +157,8 @@ module Rack # :nodoc:
       assoc_handle assoc_type claimed_id contact delegate dh_consumer_public dh_gen
       dh_modulus error identity invalidate_handle mode ns op_endpoint openid
       realm reference response_nonce return_to server session_type sig
-      signed trust_root
-    )
+      signed trust_root)
+    FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
     
     def initialize(env)
       @env = env
@@ -241,10 +241,8 @@ module Rack # :nodoc:
         "assoc_handle" => assoc_handle
       )
       r["invalidate_handle"] = invalidate_handle if invalidate_handle
-      r["signed"] ||= []
-      r["signed"] += %w{op_endpoint return_to assoc_handle response_nonce}
-      r["signed"] += %w{identity claimed_id} if r["identity"] and r["claimed_id"]
-      r["signed"] = r["signed"].join(",")
+
+      r["signed"] = FIELD_SIGNED.select {|field| r[field] }.join(",")
       r["sig"] = OpenID.gen_sig(mac, r)
       r
     end
