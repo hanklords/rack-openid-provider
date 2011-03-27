@@ -431,3 +431,5 @@ module Rack # :nodoc:
     end
   end
 end
+
+require 'rack/openid-provider-sreg'
