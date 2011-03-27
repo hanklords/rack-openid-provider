@@ -224,6 +224,7 @@ module Rack # :nodoc:
     end
     
     def gen_pos(h = {})
+      assoc_handle = assoc_handle
       mac = handles[assoc_handle]
       if mac.nil? # Generate a mac and invalidate the association handle
         invalidate_handle = assoc_handle
@@ -337,12 +338,12 @@ module Rack # :nodoc:
       
       begin
         r.update req.session_type.to_hash(mac, p, g, c)
+
+        @handles[handle] = mac
+        direct_response r
       rescue OpenID::DH::SHA_ANY::MissingKey
-        return direct_error("dh_consumer_public missing")
+        direct_error("dh_consumer_public missing")
       end
-      
-      @handles[handle] = mac
-      direct_response r
     end
     
     def checkid_immediate(env)
