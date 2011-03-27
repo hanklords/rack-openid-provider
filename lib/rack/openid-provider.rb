@@ -155,9 +155,9 @@ module Rack # :nodoc:
     MAX_REDIRECT_SIZE = 1024
     FIELDS = %w(
       assoc_handle assoc_type claimed_id contact delegate dh_consumer_public dh_gen
-      dh_modulus error identity invalidate_handle mode ns op_endpoint openid
+      dh_modulus error identity invalidate_handle mode ns op_endpoint
       realm reference response_nonce return_to server session_type sig
-      signed trust_root)
+      signed trust_root).freeze
     FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
     
     def initialize(env)
