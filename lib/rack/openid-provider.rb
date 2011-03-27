@@ -151,9 +151,15 @@ end
 
 module Rack # :nodoc:
   class OpenIDRequest
-    MAX_REDIRECT_SIZE = 1024
     class NoReturnTo < StandardError; end
-      
+    MAX_REDIRECT_SIZE = 1024
+    FIELDS = %w(
+      assoc_handle assoc_type claimed_id contact delegate dh_consumer_public dh_gen
+      dh_modulus error identity invalidate_handle mode ns op_endpoint openid
+      realm reference response_nonce return_to server session_type sig
+      signed trust_root
+    )
+    
     def initialize(env)
       @env = env
     end
@@ -163,6 +169,9 @@ module Rack # :nodoc:
     def []=(k, v); params[k] = v end
       
     # Some accessor helpers
+    FIELDS.each { |field|
+      class_eval %{def #{field}; params['#{field}'] end}
+    }
     def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
     def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
     def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
@@ -173,7 +182,6 @@ module Rack # :nodoc:
     def return_negative(h = {}); return_response gen_neg(h) end
     def return_error(error, h = {}); return_response gen_error(error, h) end
     
-
     def gen_html_fields(h)
       h.map {|k,v|
         "<input type='hidden' name='openid.#{k}' value='#{v}' />"
@@ -192,24 +200,23 @@ module Rack # :nodoc:
       openid_params
     end
     
-    def redirect_res(return_to, h)
+    def redirect_res(h)
       d = URI(return_to)
       d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
       [302, {'Location' => d.to_s, 'Content-Type' => "text/plain", 'Content-Length' => "0"}, [""]]
     end
     
     def return_response(h)
-      return_to = params['return_to']
-      raise NoReturnTo if params['return_to'].nil?
+      raise NoReturnTo if return_to.nil?
       
       if OpenID.url_encode(h).size > MAX_REDIRECT_SIZE
-        gen_htmlform(return_to, h)
+        gen_htmlform(h)
       else
-        redirect_res(return_to, h)
+        redirect_res(h)
       end
     end
 
-    def gen_htmlform(return_to, h)
+    def gen_htmlform(h)
       body = "<html><body onload='this.openid_form.submit();'>"
       body << "<form name='openid_form' method='post' action='#{return_to}'>"
       body << gen_html_fields(h)
@@ -217,9 +224,6 @@ module Rack # :nodoc:
     end
     
     def gen_pos(h = {})
-      raise NoReturnTo if params['return_to'].nil?
-      
-      assoc_handle = params['assoc_handle']
       mac = handles[assoc_handle]
       if mac.nil? # Generate a mac and invalidate the association handle
         invalidate_handle = assoc_handle
@@ -232,7 +236,7 @@ module Rack # :nodoc:
         "ns" => OpenID::NS,
         "mode" => "id_res",
         "op_endpoint" => options['op_endpoint'] || Request.new(@env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url,
-        "return_to" => params['return_to'],
+        "return_to" => return_to,
         "response_nonce" => nonce,
         "assoc_handle" => assoc_handle
       )
@@ -246,7 +250,7 @@ module Rack # :nodoc:
     end
 
     def gen_neg(h = {})
-      if params['mode'] == "checkid_immediate"
+      if mode == "checkid_immediate"
         h.merge "ns" => OpenID::NS, "mode" => "setup_needed"
       else
         h.merge "ns" => OpenID::NS, "mode" => "cancel"
@@ -291,7 +295,7 @@ module Rack # :nodoc:
       openid_req['mode'] = nil if not req.path_info == "/"
       clean_handles
 
-      case openid_req['mode']
+      case openid_req.mode
       when 'associate'
         associate(env)
       when 'checkid_immediate'
@@ -356,7 +360,7 @@ module Rack # :nodoc:
     def unknown_mode(env)
       req = OpenIDRequest.new(env)
       error = "Unknown mode"
-      if req['return_to'] # Indirect Request
+      if req.return_to # Indirect Request
         req.return_error(error)
       else # Direct Request
         direct_error(error)
@@ -365,9 +369,9 @@ module Rack # :nodoc:
 
     def check_authentication(env)
       req = OpenIDRequest.new(env)
-      assoc_handle = req['assoc_handle']
-      invalidate_handle = req['invalidate_handle']
-      nonce = req['response_nonce']
+      assoc_handle = req.assoc_handle
+      invalidate_handle = req.invalidate_handle
+      nonce = req.response_nonce
 
       # Check if assoc_handle, nonce and signature are valid. Then delete the response nonce
       if mac = @private_handles[assoc_handle] and @nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, req.params) == req['sig']
