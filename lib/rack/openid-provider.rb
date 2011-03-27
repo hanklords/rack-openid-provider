@@ -172,6 +172,7 @@ module Rack # :nodoc:
     FIELDS.each { |field|
       class_eval %{def #{field}; params['#{field}'] end}
     }
+    def identifier_select?; OpenID::IDENTIFIER_SELECT == identity end
     def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
     def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
     def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
