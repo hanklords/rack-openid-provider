@@ -151,8 +151,6 @@ end
 
 module Rack # :nodoc:
   class OpenIDRequest
-    class NoReturnTo < StandardError; end
-    MAX_REDIRECT_SIZE = 1024
     FIELDS = %w(
       assoc_handle assoc_type claimed_id contact delegate dh_consumer_public dh_gen
       dh_modulus error identity invalidate_handle mode ns op_endpoint
@@ -183,7 +181,7 @@ module Rack # :nodoc:
     def return_negative(h = {}); return_response gen_neg(h) end
     def return_error(error, h = {}); return_response gen_error(error, h) end
     
-    def gen_html_fields(h)
+    def self.gen_html_fields(h)
       h.map {|k,v|
         "<input type='hidden' name='openid.#{k}' value='#{v}' />"
       }.join("\n")
@@ -201,27 +199,8 @@ module Rack # :nodoc:
       openid_params
     end
     
-    def redirect_res(h)
-      d = URI(return_to)
-      d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
-      [302, {'Location' => d.to_s, 'Content-Type' => "text/plain", 'Content-Length' => "0"}, [""]]
-    end
-    
     def return_response(h)
-      raise NoReturnTo if return_to.nil?
-      
-      if OpenID.url_encode(h).size > MAX_REDIRECT_SIZE
-        gen_htmlform(h)
-      else
-        redirect_res(h)
-      end
-    end
-
-    def gen_htmlform(h)
-      body = "<html><body onload='this.openid_form.submit();'>"
-      body << "<form name='openid_form' method='post' action='#{return_to}'>"
-      body << gen_html_fields(h)
-      body << "<input type='submit' /></form></body></html>"
+      [200, {"openid.provider" => h}, []]
     end
     
     def gen_pos(h = {})
@@ -271,6 +250,8 @@ module Rack # :nodoc:
   #     run MyProvider.new
   #   }
   class OpenIDProvider
+    MAX_REDIRECT_SIZE = 1024
+    class NoReturnTo < StandardError; end
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
@@ -349,14 +330,15 @@ module Rack # :nodoc:
     
     def checkid_immediate(env)
       if @options['checkid_immediate']
-        @app.call(env)
+        response(env)
       else
-        OpenIDRequest.new(env).return_negative
+        req = OpenIDRequest.new(env)
+        redirect_res(req.return_to, "ns" => OpenID::NS, "mode" => "setup_needed")
       end
     end
     
-    def checkid_setup(env); @app.call(env) end
-    def default(env); @app.call(env) end
+    def checkid_setup(env); response(env)  end
+    def default(env); response(env) end
     def unknown_mode(env)
       req = OpenIDRequest.new(env)
       error = "Unknown mode"
@@ -381,6 +363,37 @@ module Rack # :nodoc:
       else
         direct_response "is_valid" => "false"
       end
+    end
+
+    def response(env)
+      c,h,b = @app.call(env)
+      
+      if response = h["openid.provider"]
+        return_to = response["return_to"]
+        raise NoReturnTo if return_to.nil?
+        
+        if OpenID.url_encode(h).size > MAX_REDIRECT_SIZE
+          gen_htmlform(return_to, response)
+        else
+          redirect_res(return_to, response)
+        end
+      else
+        [c,h,b]
+      end
+    end
+
+    def redirect_res(return_to, h)
+      d = URI(return_to)
+      d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
+      [302, {"Location" => d.to_s, "Content-Type" => "text/plain", "Content-Length" => "0"}, []]
+    end
+    
+    def gen_htmlform(return_to, h)
+      body = "<html><body onload='this.openid_form.submit();'>"
+      body << "<form name='openid_form' method='post' action='#{return_to}'>"
+      body << OpenIDRequest.gen_html_fields(h)
+      body << "<input type='submit' /></form></body></html>"
+      [200, {"Content-Type" => "text/plain", "Content-Length" => body.size}, [body]]
     end
     
     def direct_response(h)

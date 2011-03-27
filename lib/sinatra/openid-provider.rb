@@ -6,6 +6,7 @@ module Sinatra
     
     module Helpers
       def openid; Rack::OpenIDRequest.new(env) end
+      def openid_html_fields(h) Rack::OpenIDRequest.gen_html_fields(h) end
     end
    
     def checkid_setup(&block)
