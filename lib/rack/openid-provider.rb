@@ -445,7 +445,37 @@ module Rack # :nodoc:
         end
       end
     end
-    
+
+    class XRDS
+      CONTENT_TYPE = "application/xrds+xml".freeze
+      CONTENT =
+  %{<?xml version="1.0" encoding="UTF-8"?>
+<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
+<XRD>
+  <Service priority="0">
+    <Type>#{OpenID::SERVER}</Type>
+    <URI>%s</URI>
+  </Service>
+</XRD>
+</xrds:XRDS>}.freeze
+
+      def initialize(app) @app = app end
+      def call(env)
+        req = Request.new(env)
+        oreq = OpenIDRequest.new(env)
+        
+        if !oreq.valid? and 
+            (req.path_info == "/" or req.path == "/") and
+            env['HTTP_ACCEPT'].include?(CONTENT_TYPE) and
+            oreq.options['xrds']
+          content = CONTENT % Request.new(env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
+          [200, {"Content-Type" => CONTENT_TYPE, "Content-Length" => content.size.to_s}, [content] ]
+        else
+          @app.call(env)
+        end
+      end
+    end
+
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
@@ -453,9 +483,10 @@ module Rack # :nodoc:
       'middlewares' => [],
       'handles' => {},
       'private_handles' => {},
-      'nonces' = {}
+      'nonces' => {},
+      'xrds' => true
     }
-    DEFAULT_MIDDLEWARES = [Error, CheckAuthentication, Checkid, Associate]
+    DEFAULT_MIDDLEWARES = [Error, CheckAuthentication, Checkid, Associate, XRDS]
 
     attr_reader :options, :handles, :private_handles, :nonces
     def initialize(app, options = {})
@@ -480,36 +511,7 @@ module Rack # :nodoc:
       env['openid.provider.private_handles'] ||= @private_handles      
     end
   end
-  
-  class Yadis
-    NOT_FOUND = "Not Found".freeze
-    CONTENT =
-%{<?xml version="1.0" encoding="UTF-8"?>
-<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
-<XRD>
-  <Service priority="0">
-%s</Service>
-</XRD>
-</xrds:XRDS>
-}.freeze
 
-    def initialize(service)
-      fragment = service.map { |k,v|
-        v = [v] if not v.respond_to? :map
-        v.map { |t| "    <#{k}>#{t}</#{k}>\n" }.join
-      }.join
-      @content = (CONTENT % [fragment]).freeze
-    end
-    
-    def call(env)
-      req = Request.new(env)
-      if req.path_info != "/" and req.path != "/"
-        [404, {"Content-Type" => "plain/text", "Content-Length" => NOT_FOUND.size.to_s}, [NOT_FOUND] ]
-      end
-      
-      [200, {"Content-Type" => "application/xrds+xml", "Content-Length" => @content.size.to_s}, [@content] ]
-    end
-  end
 end
 
 require 'rack/openid-provider-sreg'
