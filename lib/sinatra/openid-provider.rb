@@ -16,8 +16,11 @@ module Sinatra
       post "/", :openid_mode => mode, &block
     end
     
+    # OpenID Request modes
+    def associate(&block) route_openid("associate", &block) end
     def checkid_setup(&block) route_openid("checkid_setup", &block) end
     def checkid_immediate(&block) route_openid("checkid_immediate", &block) end
+    def check_authentication(&block) route_openid("check_authentication", &block) end
     
     def self.registered(app)
       app.helpers OpenIDProvider::Helpers
