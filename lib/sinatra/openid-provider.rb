@@ -10,19 +10,23 @@ module Sinatra
       def oip_html_fields(h) Rack::OpenIDResponse.gen_html_fields(h) end
     end
    
-    def checkid_setup(&block)
-      get  "/", :openid_mode => "checkid_setup", &block
-      post "/", :openid_mode => "checkid_setup", &block
+    def route_openid(mode, &block)
+      openid_modes[mode] = true
+      get  "/", :openid_mode => mode, &block
+      post "/", :openid_mode => mode, &block
     end
-       
-    def checkid_immediate(&block)
-      get  "/", :openid_mode => "checkid_immediate", &block
-      post "/", :openid_mode => "checkid_immediate", &block
-    end
+    
+    def checkid_setup(&block) route_openid("checkid_setup", &block) end
+    def checkid_immediate(&block) route_openid("checkid_immediate", &block) end
     
     def self.registered(app)
       app.helpers OpenIDProvider::Helpers
-      app.set(:openid_mode) { |value| condition { oip_request.mode == value } }
+      app.set(:openid_mode) { |value| condition { oip_request.valid? and oip_request.mode == value } }
+      app.set(:openid_modes, {})
+      
+      app.before do
+        raise NotFound if oip_request.valid? and !settings.openid_modes[oip_request.mode]
+      end
     end
   end
   

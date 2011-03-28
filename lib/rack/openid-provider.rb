@@ -168,6 +168,8 @@ module Rack # :nodoc:
     FIELDS.each { |field|
       class_eval %{def #{field}; params['#{field}'] end}
     }
+    
+    def valid?; mode and Request.new(@env).path_info == "/" end
     def identifier_select?; OpenID::IDENTIFIER_SELECT == identity end
     def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
     def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
@@ -322,7 +324,7 @@ module Rack # :nodoc:
       def initialize(app, options = {}) @app = app end
       def call(env)
         req = OpenIDRequest.new(env)
-        if req.mode == 'associate'
+        if req.valid? and req.mode == 'associate'
           associate(req)
         else
           @app.call(env)
@@ -363,7 +365,7 @@ module Rack # :nodoc:
       def initialize(app, options = {}) @app = app end
       def call(env)
         req = OpenIDRequest.new(env)
-        if req.mode == 'checkid_immediate' and !req.options['checkid_immediate']
+        if req.valid? and req.mode == 'checkid_immediate' and !req.options['checkid_immediate']
           OpenIDResponse.new(env).negative!
         else
           @app.call(env)
@@ -380,7 +382,7 @@ module Rack # :nodoc:
       def initialize(app, options = {}) @app = app end
       def call(env)
         req = OpenIDRequest.new(env)
-        if req.mode == 'check_authentication'
+        if req.valid? and req.mode == 'check_authentication'
           check_authentication(req)
         else
           @app.call(env)
@@ -396,9 +398,9 @@ module Rack # :nodoc:
         if mac = req.private_handles[assoc_handle] and req.nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, req.params) == req['sig']
           res = OpenIDResponse.new(req.env, "is_valid" => "true")
           res["invalidate_handle"] = invalidate_handle if invalidate_handle && req.handles[invalidate_handle].nil?
-          res
+          res.finish!
         else
-          OpenIDResponse.new(env, "is_valid" => "false")
+          OpenIDResponse.new(env, "is_valid" => "false").finish!
         end
       end
     end
@@ -418,14 +420,10 @@ module Rack # :nodoc:
     end
 
     def call(env)
-      req = Request.new(env)
-      openid_req = OpenIDRequest.new(env)
-      
       env['openid.provider.options'] = @options
       env['openid.provider.nonces'] = @nonces
       env['openid.provider.handles'] = @handles
       env['openid.provider.private_handles'] = @private_handles
-      openid_req['mode'] = nil if not req.path_info == "/"
       clean_handles
 
       @middleware.call(env)
