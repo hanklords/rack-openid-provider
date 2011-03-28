@@ -196,7 +196,12 @@ module Rack # :nodoc:
   end
   
   class OpenIDResponse
-    class NoReturnTo < StandardError; end
+    class NoReturnTo < StandardError
+      def initialize(res)
+        @res = res.error!("no return_to", "orig_mode" => @res["mode"])
+      end
+      def finish!; @res end
+    end
     
     MODES = %w(error cancel setup_needed id_res is_valid)
     MAX_REDIRECT_SIZE = 1024
@@ -230,7 +235,7 @@ module Rack # :nodoc:
       
     def indirect?; !direct? end
     def indirect!(return_to)
-      raise NoReturnTo if return_to.nil?
+      raise NoReturnTo.new(self) if return_to.nil?
       @return_to = return_to
       @direct = false 
     end
@@ -330,6 +335,8 @@ module Rack # :nodoc:
           res.indirect!(req.return_to)
         end
         res.finish!
+      rescue NoReturnTo => e
+        e.finish!
       end
     end
     
@@ -415,6 +422,8 @@ module Rack # :nodoc:
         
         res.indirect!(req.return_to)
         res.finish!
+      rescue NoReturnTo => e
+        e.finish!
       end
     end
     
@@ -477,13 +486,9 @@ module Rack # :nodoc:
     end
 
     DEFAULT_OPTIONS = {
-      'handle_timeout' => 36000,
-      'private_handle_timeout' => 300,
-      'nonce_timeout' => 300,
+      'handle_timeout' => 36000, 'private_handle_timeout' => 300, 'nonce_timeout' => 300,
+      'handles' => {}, 'private_handles' => {}, 'nonces' => {},
       'middlewares' => [],
-      'handles' => {},
-      'private_handles' => {},
-      'nonces' => {},
       'xrds' => true
     }
     DEFAULT_MIDDLEWARES = [Error, CheckAuthentication, Checkid, Associate, XRDS]
