@@ -317,13 +317,6 @@ module Rack # :nodoc:
   #     run MyProvider.new
   #   }
   class OpenIDProvider
-    class Response
-      def initialize(app, options = {}) @app = app end
-      def call(env)
-        @app.call(env)
-      end
-    end
-    
     class Associate
       def initialize(app, options = {}) @app = app end
       def call(env)
@@ -410,13 +403,11 @@ module Rack # :nodoc:
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
-      'nonce_timeout' => 300,
-      'checkid_immediate' => false
+      'nonce_timeout' => 300
     }
 
     def initialize(app, options = {})
-      @app = app
-      @middleware = [CheckAuthentication, Checkid, Associate, Response].inject(@app) {|a, m| m.new(a)}
+      @middleware = [CheckAuthentication, Checkid, Associate].inject(app) {|a, m| m.new(a)}
       @options = DEFAULT_OPTIONS.merge(options)
       @handles, @private_handles, @nonces = {}, {}, {}
     end
