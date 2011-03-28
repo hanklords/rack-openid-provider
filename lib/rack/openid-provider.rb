@@ -449,12 +449,14 @@ module Rack # :nodoc:
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
-      'nonce_timeout' => 300
+      'nonce_timeout' => 300,
+      'middlewares' => []
     }
+    DEFAULT_MIDDLEWARES = [Error, CheckAuthentication, Checkid, Associate]
 
     def initialize(app, options = {})
-      @middleware = [CheckAuthentication, Checkid, Associate, Error].inject(app) {|a, m| m.new(a)}
       @options = DEFAULT_OPTIONS.merge(options)
+      @middleware = (DEFAULT_MIDDLEWARES + @options['middlewares']).reverse.inject(app) {|a, m| m.new(a)}
       @handles, @private_handles, @nonces = {}, {}, {}
     end
 
