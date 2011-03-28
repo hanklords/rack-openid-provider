@@ -461,10 +461,10 @@ module Rack # :nodoc:
     end
 
     def call(env)
-      env['openid.provider.options'] = @options
-      env['openid.provider.nonces'] = @nonces
-      env['openid.provider.handles'] = @handles
-      env['openid.provider.private_handles'] = @private_handles
+      env['openid.provider.options'] ||= @options
+      env['openid.provider.nonces'] ||= @nonces
+      env['openid.provider.handles'] ||= @handles
+      env['openid.provider.private_handles'] ||= @private_handles
       clean_handles
 
       @middleware.call(env)
