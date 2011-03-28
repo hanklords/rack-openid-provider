@@ -6,7 +6,7 @@ module Sinatra
     
     module Helpers
       def oip_request; Rack::OpenIDRequest.new(env) end
-      def oip_response; @oip_response ||= Rack::OpenIDResponse.new(env) end
+      def oip_response; @oip_response ||= Rack::OpenIDResponse.new end
       def oip_html_fields(h) Rack::OpenIDResponse.gen_html_fields(h) end
     end
    
