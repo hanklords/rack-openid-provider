@@ -197,10 +197,11 @@ module Rack # :nodoc:
   
   class OpenIDResponse
     class NoReturnTo < StandardError
+      attr_reader :res
       def initialize(res)
-        @res = res.error!("no return_to", "orig_mode" => @res["mode"])
+        @res = res
+        res.error!("no return_to", "orig_mode" => @res["mode"]) if not res.error?
       end
-      def finish!; @res end
     end
     
     MODES = %w(error cancel setup_needed id_res is_valid)
@@ -316,27 +317,81 @@ module Rack # :nodoc:
   #   }
   class OpenIDProvider
     FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
-    
-    class Error
+
+    class XRDS
+      CONTENT_TYPE = "application/xrds+xml".freeze
+      CONTENT =
+  %{<?xml version="1.0" encoding="UTF-8"?>
+<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
+<XRD>
+  <Service priority="0">
+    <Type>#{OpenID::SERVER}</Type>
+    <URI>%s</URI>
+  </Service>
+</XRD>
+</xrds:XRDS>}.freeze
+
       def initialize(app) @app = app end
       def call(env)
-        c,h,b = @app.call(env)
-        if OpenIDResponse === b and b.error?
-          finish_error!(OpenIDRequest.new(env), b)
+        if serve?(env)
+          content = CONTENT % Request.new(env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
+          [200, {"Content-Type" => CONTENT_TYPE, "Content-Length" => content.size.to_s}, [content] ]
         else
-          [c,h,b]
+          @app.call(env)
         end
       end
       
+      def serve?(env)
+        req, oreq = Request.new(env), OpenIDRequest.new(env)
+        !oreq.valid? and oreq.options['xrds'] and 
+          (req.path_info == "/" or req.path == "/") and
+          env['HTTP_ACCEPT'].include?(CONTENT_TYPE)
+      end
+    end
+    
+    # Finish the response : add error informations and handle direct/indirect response
+    class FinishResponse
+      def initialize(app) @app = app end
+      def call(env)
+        c,h,b = @app.call(env)
+        req = OpenIDRequest.new(env)
+        res = b
+        if OpenIDResponse === res
+          finish_error!(req, res) if res.error?
+          res.indirect!(req.return_to) if indirect?(req, res)
+          res.finish!
+        else
+          [c,h,b]
+        end
+      rescue OpenIDResponse::NoReturnTo => e
+        finish_error!(req, e.res)
+      end
+            
       def finish_error!(req, res)
         res["contact"]   = req.options["contact"]   if req.options["contact"]
         res["reference"] = req.options["reference"] if req.options["reference"]
-        if !req.valid? or req.checkid_setup? or req.checkid_immediate?
-          res.indirect!(req.return_to)
-        end
         res.finish!
-      rescue NoReturnTo => e
-        e.finish!
+      end
+      
+      def indirect?(req, res)
+        res.negative? or res.positive? or
+          req.checkid_setup? or req.checkid_immediate? or
+          ((!req.valid? or req.env['HTTP_REFERER']) and req.return_to)
+      end
+    end
+    
+    # Raise an error if the request is a valid OpenID request but no middleware caught it
+    class NotFound
+      def initialize(app) @app = app end
+      def call(env)
+        c,h,b = @app.call(env)
+        req = OpenIDRequest.new(env)
+        if req.valid? and c == 404 and h["X-Cascade"] == "pass"
+          res = OpenIDResponse.new
+          res.error!("Unknown mode")
+        else
+          [c,h,b]
+        end
       end
     end
     
@@ -420,10 +475,8 @@ module Rack # :nodoc:
           res["sig"] = OpenID.gen_sig(mac, res.params)
         end
         
-        res.indirect!(req.return_to)
         res.finish!
-      rescue NoReturnTo => e
-        e.finish!
+
       end
     end
     
@@ -455,43 +508,13 @@ module Rack # :nodoc:
       end
     end
 
-    class XRDS
-      CONTENT_TYPE = "application/xrds+xml".freeze
-      CONTENT =
-  %{<?xml version="1.0" encoding="UTF-8"?>
-<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">
-<XRD>
-  <Service priority="0">
-    <Type>#{OpenID::SERVER}</Type>
-    <URI>%s</URI>
-  </Service>
-</XRD>
-</xrds:XRDS>}.freeze
-
-      def initialize(app) @app = app end
-      def call(env)
-        req = Request.new(env)
-        oreq = OpenIDRequest.new(env)
-        
-        if !oreq.valid? and 
-            (req.path_info == "/" or req.path == "/") and
-            env['HTTP_ACCEPT'].include?(CONTENT_TYPE) and
-            oreq.options['xrds']
-          content = CONTENT % Request.new(env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
-          [200, {"Content-Type" => CONTENT_TYPE, "Content-Length" => content.size.to_s}, [content] ]
-        else
-          @app.call(env)
-        end
-      end
-    end
-
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000, 'private_handle_timeout' => 300, 'nonce_timeout' => 300,
       'handles' => {}, 'private_handles' => {}, 'nonces' => {},
       'middlewares' => [],
       'xrds' => true
     }
-    DEFAULT_MIDDLEWARES = [Error, CheckAuthentication, Checkid, Associate, XRDS]
+    DEFAULT_MIDDLEWARES = [XRDS, FinishResponse, NotFound, CheckAuthentication, Checkid, Associate]
 
     attr_reader :options, :handles, :private_handles, :nonces
     def initialize(app, options = {})
