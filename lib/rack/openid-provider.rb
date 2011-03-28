@@ -450,21 +450,22 @@ module Rack # :nodoc:
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
       'nonce_timeout' => 300,
-      'middlewares' => []
+      'middlewares' => [],
+      'handles' => {},
+      'private_handles' => {},
+      'nonces' = {}
     }
     DEFAULT_MIDDLEWARES = [Error, CheckAuthentication, Checkid, Associate]
 
+    attr_reader :options, :handles, :private_handles, :nonces
     def initialize(app, options = {})
       @options = DEFAULT_OPTIONS.merge(options)
       @middleware = (DEFAULT_MIDDLEWARES + @options['middlewares']).reverse.inject(app) {|a, m| m.new(a)}
-      @handles, @private_handles, @nonces = {}, {}, {}
+      @handles, @private_handles, @nonces = @options['handles'], @options['private_handles'], @options['nonces']
     end
 
     def call(env)
-      env['openid.provider.options'] ||= @options
-      env['openid.provider.nonces'] ||= @nonces
-      env['openid.provider.handles'] ||= @handles
-      env['openid.provider.private_handles'] ||= @private_handles
+      sev_env(env)
       clean_handles
 
       @middleware.call(env)
@@ -472,6 +473,12 @@ module Rack # :nodoc:
 
     private
     def clean_handles; end
+    def sev_env(env)
+      env['openid.provider.options'] ||= @options
+      env['openid.provider.nonces'] ||= @nonces
+      env['openid.provider.handles'] ||= @handles
+      env['openid.provider.private_handles'] ||= @private_handles      
+    end
   end
   
   class Yadis
