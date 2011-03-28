@@ -202,7 +202,6 @@ module Rack # :nodoc:
     def initialize(env, h = {})
       @req = OpenIDRequest.new(env)
       @h = h.merge("ns" => OpenID::NS)
-      @http_headers = {"Content-Type" => "text/plain"}
     end
     
     def [](k) @h[k] end
@@ -220,7 +219,7 @@ module Rack # :nodoc:
       @h.merge! "mode" => "error", "error" => error
       @h["contact"]   = @req.options["contact"]   if @req.options["contact"]
       @h["reference"] = @req.options["reference"] if @req.options["reference"]
-      self
+      finish!
     end
     
     def negative!(h = {})
@@ -230,7 +229,7 @@ module Rack # :nodoc:
       else
         @h["mode"] = "cancel"
       end
-      self
+      finish!
     end
         
     def positive!(h = {})
@@ -255,7 +254,7 @@ module Rack # :nodoc:
 
       @h["signed"] = FIELD_SIGNED.select {|field| @h[field] }.join(",")
       @h["sig"] = OpenID.gen_sig(mac, @h)
-      self
+      finish!
     end
 
     def error?; @h["mode"] == "error" end
@@ -269,16 +268,17 @@ module Rack # :nodoc:
     end
     
     def http_headers
-      @http_headers.merge!("Content-Length" => http_body.size.to_s)
+      headers = {"Content-Type" => "text/plain"}
+      headers.merge!("Content-Length" => http_body.size.to_s)
       if direct?
-        @http_headers
+        headers
       else
         if html_form?
-          @http_headers.merge!("Content-Type" => "text/html")
+          headers.merge!("Content-Type" => "text/html")
         else
           d = URI(@req.return_to)
           d.query = d.query ? d.query + "&" + OpenID.url_encode(@h) : OpenID.url_encode(@h)
-          @http_headers.merge!("Location" => d.to_s)
+          headers.merge!("Location" => d.to_s)
         end
       end
     end
@@ -301,7 +301,8 @@ module Rack # :nodoc:
     end
 
     def each; yield http_body end
-    def to_a; [http_status, http_headers, self] end
+    def finish!; [http_status, http_headers, self] end
+    alias :to_a :finish!
   end
   
   # This is a Rack middleware:
@@ -351,9 +352,9 @@ module Rack # :nodoc:
         begin
           res.params.merge! req.session_type.to_hash(mac, p, g, c)
           req.handles[handle] = mac
-          res.to_a
+          res.finish!
         rescue OpenID::DH::SHA_ANY::MissingKey
-          res.error!("dh_consumer_public missing").to_a
+          res.error!("dh_consumer_public missing")
         end
       end
     end
@@ -363,7 +364,7 @@ module Rack # :nodoc:
       def call(env)
         req = OpenIDRequest.new(env)
         if req.mode == 'checkid_immediate' and !req.options['checkid_immediate']
-          OpenIDResponse.new(env).negative!.to_a
+          OpenIDResponse.new(env).negative!
         else
           @app.call(env)
         end
@@ -395,9 +396,9 @@ module Rack # :nodoc:
         if mac = req.private_handles[assoc_handle] and req.nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, req.params) == req['sig']
           res = OpenIDResponse.new(req.env, "is_valid" => "true")
           res["invalidate_handle"] = invalidate_handle if invalidate_handle && req.handles[invalidate_handle].nil?
-          res.to_a
+          res
         else
-          OpenIDResponse.new(env, "is_valid" => "false").to_a
+          OpenIDResponse.new(env, "is_valid" => "false")
         end
       end
     end

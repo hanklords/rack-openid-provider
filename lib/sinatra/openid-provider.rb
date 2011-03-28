@@ -24,10 +24,6 @@ module Sinatra
       app.helpers OpenIDProvider::Helpers
       app.set(:openid_mode) { |value| condition { oip_request.mode == value } }
     end
-    
-    def self.route_added(*args)
-      p args
-    end
   end
   
   register OpenIDProvider
