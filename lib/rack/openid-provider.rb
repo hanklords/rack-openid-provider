@@ -156,6 +156,7 @@ module Rack # :nodoc:
       dh_modulus error identity invalidate_handle mode ns op_endpoint
       realm reference response_nonce return_to server session_type sig
       signed trust_root).freeze
+    MODES = %w(associate checkid_setup checkid_immediate check_authentication)
     
     attr_reader :env
     def initialize(env) @env = env end
@@ -167,6 +168,9 @@ module Rack # :nodoc:
     # Some accessor helpers
     FIELDS.each { |field|
       class_eval %{def #{field}; params['#{field}'] end}
+    }
+    MODES.each { |field|
+      class_eval %{def #{field}?; valid? and mode == "#{field}" end}
     }
     
     def valid?; mode and Request.new(@env).path_info == "/" end
@@ -323,11 +327,12 @@ module Rack # :nodoc:
     class Associate
       def initialize(app, options = {}) @app = app end
       def call(env)
+        c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
-        if req.valid? and req.mode == 'associate'
+        if req.associate? and c == 404 and h["X-Cascade"] == "pass"
           associate(req)
         else
-          @app.call(env)
+          [c,h,b]
         end
       end
       
@@ -361,31 +366,28 @@ module Rack # :nodoc:
       end
     end
     
-    class CheckidImmediate
+    class Checkid
       def initialize(app, options = {}) @app = app end
       def call(env)
+        c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
-        if req.valid? and req.mode == 'checkid_immediate' and !req.options['checkid_immediate']
+        if (req.checkid_setup? or req.checkid_immediate?) and c == 404 and h["X-Cascade"] == "pass"
           OpenIDResponse.new(env).negative!
         else
-          @app.call(env)
+          [c,h,b]
         end
       end
-    end
-    
-    class CheckidSetup
-      def initialize(app, options = {}) @app = app end
-      def call(env) @app.call(env) end
     end
     
     class CheckAuthentication
       def initialize(app, options = {}) @app = app end
       def call(env)
+        c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
-        if req.valid? and req.mode == 'check_authentication'
+        if req.check_authentication?  and c == 404 and h["X-Cascade"] == "pass"
           check_authentication(req)
         else
-          @app.call(env)
+          [c,h,b]
         end
       end
 
@@ -414,7 +416,7 @@ module Rack # :nodoc:
 
     def initialize(app, options = {})
       @app = app
-      @middleware = [CheckAuthentication, CheckidSetup, CheckidImmediate, Associate, Response].inject(@app) {|a, m| m.new(a)}
+      @middleware = [CheckAuthentication, Checkid, Associate, Response].inject(@app) {|a, m| m.new(a)}
       @options = DEFAULT_OPTIONS.merge(options)
       @handles, @private_handles, @nonces = {}, {}, {}
     end
