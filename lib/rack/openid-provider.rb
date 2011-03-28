@@ -318,7 +318,10 @@ module Rack # :nodoc:
   #   }
   class OpenIDProvider
     class Associate
-      def initialize(app, options = {}) @app = app end
+      class NotSupported < StandardError; end
+      class IncompatibleTypes < StandardError; end
+
+      def initialize(app) @app = app end
       def call(env)
         c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
@@ -330,37 +333,33 @@ module Rack # :nodoc:
       end
       
       def associate(req)
-        p = req.dh_modulus
-        g = req.dh_gen
-        c = req.dh_consumer_public
-
-        if req.session_type.nil? or req.assoc_type.nil?
-          return req.return_error("session type or association type not supported", "error_code" => "unsupported-type")
-        elsif not req.session_type.compatible_key_size?(req.assoc_type.size)
-          return req.return_error("session type and association type are incompatible")
-        end
+        res = OpenIDResponse.new(req.env)
         
+        raise NotSupported if req.session_type.nil? or req.assoc_type.nil?
+        raise IncompatibleTypes if !req.session_type.compatible_key_size?(req.assoc_type.size)
+
         mac = req.assoc_type.gen_mac
         handle = OpenID.gen_handle
-        res = OpenIDResponse.new(req.env, 
-          "assoc_handle" => handle,
-          "session_type" => req['session_type'],
-          "assoc_type" => req['assoc_type'],
-          "expires_in" => req.options['handle_timeout']
-        )
         
-        begin
-          res.params.merge! req.session_type.to_hash(mac, p, g, c)
-          req.handles[handle] = mac
-          res.finish!
-        rescue OpenID::DH::SHA_ANY::MissingKey
-          res.error!("dh_consumer_public missing")
-        end
+        res["assoc_handle"] = handle
+        res["session_type"] = req['session_type']
+        res["assoc_type"] = req['assoc_type']
+        res["expires_in"] = req.options['handle_timeout']
+        
+        res.params.merge! req.session_type.to_hash(mac, req.dh_modulus, req.dh_gen, req.dh_consumer_public)
+        req.handles[handle] = mac
+        res.finish!
+      rescue IncompatibleTypes
+        res.error!("session and association types are incompatible")
+      rescue NotSupported
+        res.error!("session type or association type not supported", "error_code" => "unsupported-type")
+      rescue OpenID::DH::SHA_ANY::MissingKey
+        res.error!("dh_consumer_public missing")
       end
     end
     
     class Checkid
-      def initialize(app, options = {}) @app = app end
+      def initialize(app) @app = app end
       def call(env)
         c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
@@ -373,7 +372,7 @@ module Rack # :nodoc:
     end
     
     class CheckAuthentication
-      def initialize(app, options = {}) @app = app end
+      def initialize(app) @app = app end
       def call(env)
         c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
