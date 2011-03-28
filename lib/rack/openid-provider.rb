@@ -197,7 +197,6 @@ module Rack # :nodoc:
   class OpenIDResponse
     DIRECT = %w(associate check_authentication)
     MAX_REDIRECT_SIZE = 1024
-    FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
    
     def self.gen_html_fields(h)
       h.map {|k,v|
@@ -219,6 +218,9 @@ module Rack # :nodoc:
     def indirect?; !direct? end
     def html_form?; indirect? and OpenID.url_encode(@h).size > MAX_REDIRECT_SIZE end
     def redirect?; !html_form? end
+    def error?; @h["mode"] == "error" end
+    def negative?; @h["mode"] == "cancel" or @h["mode"] == "setup_needed" end
+    def positive?; !negative? end
 
     def error!(error, h = {})
       @h.merge!(h)
@@ -230,40 +232,16 @@ module Rack # :nodoc:
     
     def negative!(h = {})
       @h.merge!(h)
-      if @req.mode == "checkid_immediate"
-        @h["mode"] = "setup_needed"
-      else
-        @h["mode"] = "cancel"
-      end
+      @h["mode"] = "cancel"
       finish!
     end
         
     def positive!(h = {})
-      assoc_handle = @req.assoc_handle
-      mac = @req.handles[assoc_handle]
-      if mac.nil? # Generate a mac and invalidate the association handle
-        invalidate_handle = assoc_handle
-        mac = OpenID::Signatures["HMAC-SHA256"].gen_mac
-        @req.private_handles[assoc_handle = OpenID.gen_handle] = mac
-      end
-      @req.nonces[nonce = OpenID.gen_nonce] = assoc_handle
-      
       @h.merge!(h)
-      @h.merge!(
-        "mode" => "id_res",
-        "op_endpoint" => @req.options["op_endpoint"] || Request.new(env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url,
-        "return_to" => @req.return_to,
-        "response_nonce" => nonce,
-        "assoc_handle" => assoc_handle
-      )
-      @h["invalidate_handle"] = invalidate_handle if invalidate_handle
-
-      @h["signed"] = FIELD_SIGNED.select {|field| @h[field] }.join(",")
-      @h["sig"] = OpenID.gen_sig(mac, @h)
+      @h["mode"] = "id_res"
       finish!
     end
 
-    def error?; @h["mode"] == "error" end
     
     def http_status
       if direct?
@@ -317,6 +295,8 @@ module Rack # :nodoc:
   #     run MyProvider.new
   #   }
   class OpenIDProvider
+    FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
+      
     class Associate
       class NotSupported < StandardError; end
       class IncompatibleTypes < StandardError; end
@@ -364,10 +344,37 @@ module Rack # :nodoc:
         c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
         if (req.checkid_setup? or req.checkid_immediate?) and c == 404 and h["X-Cascade"] == "pass"
-          OpenIDResponse.new(env).negative!
+          finish! req, OpenIDResponse.new(env).negative!
+        elsif OpenIDResponse === b and (b["mode"] == "setup_needed" or b["mode"] == "cancel" or b["mode"] == "id_res")
+          # Indirect response
+          finish! req, b
         else
           [c,h,b]
         end
+      end
+      
+      def finish!(req, res)
+        if res.negative?
+          res["mode"] = "setup_needed" if req.checkid_immediate?
+        else
+          assoc_handle = req.assoc_handle
+          mac = req.handles[assoc_handle]
+          if mac.nil? # Generate a mac and invalidate the association handle
+            invalidate_handle = assoc_handle
+            mac = OpenID::Signatures["HMAC-SHA256"].gen_mac
+            req.private_handles[assoc_handle = OpenID.gen_handle] = mac
+          end
+          req.nonces[nonce = OpenID.gen_nonce] = assoc_handle
+          
+          res["op_endpoint"] = req.options["op_endpoint"] || Request.new(req.env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
+          res["return_to"] = req.return_to
+          res["response_nonce"] = nonce
+          res["assoc_handle"] = assoc_handle
+          res["invalidate_handle"] = invalidate_handle if invalidate_handle
+          res["signed"] = FIELD_SIGNED.select {|field| res[field] }.join(",")
+          res["sig"] = OpenID.gen_sig(mac, res.params)
+        end
+        res.finish!
       end
     end
     
