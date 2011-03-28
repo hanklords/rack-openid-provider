@@ -12,7 +12,7 @@ class OpenIDRequest
     def policy_url; @params["sreg.policy_url"] || "" end
   end
   
-  Sreg::FIELD_SIGNED.each { |field| FIELD_SIGNED << "#{Sreg::PREFIX}.#{field}" }
+  Sreg::FIELD_SIGNED.each { |field| OpenIDResponse::FIELD_SIGNED << "#{Sreg::PREFIX}.#{field}" }
   def sreg; @env['openid.provider.request.params.sreg'] ||= Rack::OpenIDRequest::Sreg.new(params) end
 end
 end

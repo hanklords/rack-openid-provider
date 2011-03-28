@@ -156,11 +156,9 @@ module Rack # :nodoc:
       dh_modulus error identity invalidate_handle mode ns op_endpoint
       realm reference response_nonce return_to server session_type sig
       signed trust_root).freeze
-    FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
     
-    def initialize(env)
-      @env = env
-    end
+    attr_reader :env
+    def initialize(env) @env = env end
 
     def params; @env['openid.provider.request.params'] ||= extract_open_id_params end
     def [](k); params[k] end
@@ -176,82 +174,234 @@ module Rack # :nodoc:
     def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
     def session_type; OpenID::DH[params['session_type']] end
     def assoc_type; OpenID::Signatures[params['assoc_type']] end
-      
-    def return_positive(h = {}); return_response gen_pos(h) end
-    def return_negative(h = {}); return_response gen_neg(h) end
-    def return_error(error, h = {}); return_response gen_error(error, h) end
-    
-    def self.gen_html_fields(h)
-      h.map {|k,v|
-        "<input type='hidden' name='openid.#{k}' value='#{v}' />"
-      }.join("\n")
-    end
-    
-    private
+
     def nonces; @env['openid.provider.nonces'] end
     def handles; @env['openid.provider.handles'] end
     def private_handles; @env['openid.provider.private_handles'] end
     def options; @env['openid.provider.options'] end
     
+    private
     def extract_open_id_params
       openid_params = {}
       Request.new(@env).params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
       openid_params
     end
-    
-    def return_response(h)
-      [200, {"openid.provider" => h}, []]
+  end
+  
+  class OpenIDResponse
+    DIRECT = %w(associate check_authentication)
+    MAX_REDIRECT_SIZE = 1024
+    FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
+   
+    def self.gen_html_fields(h)
+      h.map {|k,v|
+        "<input type='hidden' name='openid.#{k}' value='#{v}' />"
+      }.join("\n")
+    end
+
+    def initialize(env, h = {})
+      @req = OpenIDRequest.new(env)
+      @h = h.merge("ns" => OpenID::NS)
+      @http_headers = {"Content-Type" => "text/plain"}
     end
     
-    def gen_pos(h = {})
-      assoc_handle = assoc_handle
-      mac = handles[assoc_handle]
+    def [](k) @h[k] end
+    def []=(k,v) @h[k] = v end
+    def params; @h end
+    def env; @req.env end
+      
+    def direct?; DIRECT.include? @req.mode or @req.return_to.nil? end
+    def indirect?; !direct? end
+    def html_form?; indirect? and OpenID.url_encode(@h).size > MAX_REDIRECT_SIZE end
+    def redirect?; !html_form? end
+
+    def error!(error, h = {})
+      @h.merge!(h)
+      @h.merge! "mode" => "error", "error" => error
+      @h["contact"]   = @req.options["contact"]   if @req.options["contact"]
+      @h["reference"] = @req.options["reference"] if @req.options["reference"]
+      self
+    end
+    
+    def negative!(h = {})
+      @h.merge!(h)
+      if @req.mode == "checkid_immediate"
+        @h["mode"] = "setup_needed"
+      else
+        @h["mode"] = "cancel"
+      end
+      self
+    end
+        
+    def positive!(h = {})
+      assoc_handle = @req.assoc_handle
+      mac = @req.handles[assoc_handle]
       if mac.nil? # Generate a mac and invalidate the association handle
         invalidate_handle = assoc_handle
         mac = OpenID::Signatures["HMAC-SHA256"].gen_mac
-        private_handles[assoc_handle = OpenID.gen_handle] = mac
+        @req.private_handles[assoc_handle = OpenID.gen_handle] = mac
       end
-      nonces[nonce = OpenID.gen_nonce] = assoc_handle
+      @req.nonces[nonce = OpenID.gen_nonce] = assoc_handle
       
-      r = h.merge(
-        "ns" => OpenID::NS,
+      @h.merge!(h)
+      @h.merge!(
         "mode" => "id_res",
-        "op_endpoint" => options['op_endpoint'] || Request.new(@env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url,
-        "return_to" => return_to,
+        "op_endpoint" => @req.options["op_endpoint"] || Request.new(env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url,
+        "return_to" => @req.return_to,
         "response_nonce" => nonce,
         "assoc_handle" => assoc_handle
       )
-      r["invalidate_handle"] = invalidate_handle if invalidate_handle
+      @h["invalidate_handle"] = invalidate_handle if invalidate_handle
 
-      r["signed"] = FIELD_SIGNED.select {|field| r[field] }.join(",")
-      r["sig"] = OpenID.gen_sig(mac, r)
-      r
+      @h["signed"] = FIELD_SIGNED.select {|field| @h[field] }.join(",")
+      @h["sig"] = OpenID.gen_sig(mac, @h)
+      self
     end
 
-    def gen_neg(h = {})
-      if mode == "checkid_immediate"
-        h.merge "ns" => OpenID::NS, "mode" => "setup_needed"
+    def error?; @h["mode"] == "error" end
+    
+    def http_status
+      if direct?
+         error? ? 400 : 200
       else
-        h.merge "ns" => OpenID::NS, "mode" => "cancel"
+        html_form? ? 200 : 302
+      end
+    end
+    
+    def http_headers
+      @http_headers.merge!("Content-Length" => http_body.size.to_s)
+      if direct?
+        @http_headers
+      else
+        if html_form?
+          @http_headers.merge!("Content-Type" => "text/html")
+        else
+          d = URI(@req.return_to)
+          d.query = d.query ? d.query + "&" + OpenID.url_encode(@h) : OpenID.url_encode(@h)
+          @http_headers.merge!("Location" => d.to_s)
+        end
+      end
+    end
+    
+    def http_body
+      if direct?
+        OpenID.kv_encode(@h)
+      else
+        if html_form?
+          %(
+<html><body onload='this.openid_form.submit();'>
+<form name='openid_form' method='post' action='#{@req.return_to}'>"
+#{OpenIDResponse.gen_html_fields(@h)}
+<input type='submit' /></form></body></html>
+          )
+        else
+          ""
+        end
       end
     end
 
-    def gen_error(error, h = {})
-      error_res = {"ns" => OpenID::NS, "mode" => "error", "error" => error}
-      error_res["contact"] = options["contact"] if options["contact"]
-      error_res["reference"] = options["reference"] if options["reference"]
-      error_res.merge(h)
-    end
+    def each; yield http_body end
+    def to_a; [http_status, http_headers, self] end
   end
-
+  
   # This is a Rack middleware:
   #   Rack::Builder.new {
   #     use Rack::OpenIDProvider, custom_options
   #     run MyProvider.new
   #   }
   class OpenIDProvider
-    MAX_REDIRECT_SIZE = 1024
-    class NoReturnTo < StandardError; end
+    class Response
+      def initialize(app, options = {}) @app = app end
+      def call(env)
+        @app.call(env)
+      end
+    end
+    
+    class Associate
+      def initialize(app, options = {}) @app = app end
+      def call(env)
+        req = OpenIDRequest.new(env)
+        if req.mode == 'associate'
+          associate(req)
+        else
+          @app.call(env)
+        end
+      end
+      
+      def associate(req)
+        p = req.dh_modulus
+        g = req.dh_gen
+        c = req.dh_consumer_public
+
+        if req.session_type.nil? or req.assoc_type.nil?
+          return req.return_error("session type or association type not supported", "error_code" => "unsupported-type")
+        elsif not req.session_type.compatible_key_size?(req.assoc_type.size)
+          return req.return_error("session type and association type are incompatible")
+        end
+        
+        mac = req.assoc_type.gen_mac
+        handle = OpenID.gen_handle
+        res = OpenIDResponse.new(req.env, 
+          "assoc_handle" => handle,
+          "session_type" => req['session_type'],
+          "assoc_type" => req['assoc_type'],
+          "expires_in" => req.options['handle_timeout']
+        )
+        
+        begin
+          res.params.merge! req.session_type.to_hash(mac, p, g, c)
+          req.handles[handle] = mac
+          res.to_a
+        rescue OpenID::DH::SHA_ANY::MissingKey
+          res.error!("dh_consumer_public missing").to_a
+        end
+      end
+    end
+    
+    class CheckidImmediate
+      def initialize(app, options = {}) @app = app end
+      def call(env)
+        req = OpenIDRequest.new(env)
+        if req.mode == 'checkid_immediate' and !req.options['checkid_immediate']
+          OpenIDResponse.new(env).negative!.to_a
+        else
+          @app.call(env)
+        end
+      end
+    end
+    
+    class CheckidSetup
+      def initialize(app, options = {}) @app = app end
+      def call(env) @app.call(env) end
+    end
+    
+    class CheckAuthentication
+      def initialize(app, options = {}) @app = app end
+      def call(env)
+        req = OpenIDRequest.new(env)
+        if req.mode == 'check_authentication'
+          check_authentication(req)
+        else
+          @app.call(env)
+        end
+      end
+
+      def check_authentication(req)
+        assoc_handle = req.assoc_handle
+        invalidate_handle = req.invalidate_handle
+        nonce = req.response_nonce
+
+        # Check if assoc_handle, nonce and signature are valid. Then delete the response nonce
+        if mac = req.private_handles[assoc_handle] and req.nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, req.params) == req['sig']
+          res = OpenIDResponse.new(req.env, "is_valid" => "true")
+          res["invalidate_handle"] = invalidate_handle if invalidate_handle && req.handles[invalidate_handle].nil?
+          res.to_a
+        else
+          OpenIDResponse.new(env, "is_valid" => "false").to_a
+        end
+      end
+    end
+    
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000,
       'private_handle_timeout' => 300,
@@ -261,6 +411,7 @@ module Rack # :nodoc:
 
     def initialize(app, options = {})
       @app = app
+      @middleware = [CheckAuthentication, CheckidSetup, CheckidImmediate, Associate, Response].inject(@app) {|a, m| m.new(a)}
       @options = DEFAULT_OPTIONS.merge(options)
       @handles, @private_handles, @nonces = {}, {}, {}
     end
@@ -276,142 +427,11 @@ module Rack # :nodoc:
       openid_req['mode'] = nil if not req.path_info == "/"
       clean_handles
 
-      case openid_req.mode
-      when 'associate'
-        associate(env)
-      when 'checkid_immediate'
-        checkid_immediate(env)
-      when 'checkid_setup'
-        checkid_setup(env)
-      when 'check_authentication'
-        check_authentication(env)
-      when nil
-        default(env)
-      else
-        unknown_mode(env)
-      end
+      @middleware.call(env)
     end
 
     private
     def clean_handles; end
-    
-    # OpenID handlers
-    
-    def associate(env)
-      req = OpenIDRequest.new(env)
-      p = req.dh_modulus
-      g = req.dh_gen
-      c = req.dh_consumer_public
-
-      if req.session_type.nil? or req.assoc_type.nil?
-        return direct_error("session type or association type not supported", "error_code" => "unsupported-type")
-      elsif not req.session_type.compatible_key_size?(req.assoc_type.size)
-        return direct_error("session type and association type are incompatible")
-      end
-      
-      mac = req.assoc_type.gen_mac
-      handle = OpenID.gen_handle
-      r = {
-        "assoc_handle" => handle,
-        "session_type" => req['session_type'],
-        "assoc_type" => req['assoc_type'],
-        "expires_in" => @options['handle_timeout']
-      }
-      
-      begin
-        r.update req.session_type.to_hash(mac, p, g, c)
-
-        @handles[handle] = mac
-        direct_response r
-      rescue OpenID::DH::SHA_ANY::MissingKey
-        direct_error("dh_consumer_public missing")
-      end
-    end
-    
-    def checkid_immediate(env)
-      if @options['checkid_immediate']
-        response(env)
-      else
-        req = OpenIDRequest.new(env)
-        redirect_res(req.return_to, "ns" => OpenID::NS, "mode" => "setup_needed")
-      end
-    end
-    
-    def checkid_setup(env); response(env)  end
-    def default(env); response(env) end
-    def unknown_mode(env)
-      req = OpenIDRequest.new(env)
-      error = "Unknown mode"
-      if req.return_to # Indirect Request
-        req.return_error(error)
-      else # Direct Request
-        direct_error(error)
-      end
-    end
-
-    def check_authentication(env)
-      req = OpenIDRequest.new(env)
-      assoc_handle = req.assoc_handle
-      invalidate_handle = req.invalidate_handle
-      nonce = req.response_nonce
-
-      # Check if assoc_handle, nonce and signature are valid. Then delete the response nonce
-      if mac = @private_handles[assoc_handle] and @nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, req.params) == req['sig']
-        r = {"is_valid" => "true"}
-        r["invalidate_handle"] = invalidate_handle if invalidate_handle && @handles[invalidate_handle].nil?
-        direct_response r
-      else
-        direct_response "is_valid" => "false"
-      end
-    end
-
-    def response(env)
-      c,h,b = @app.call(env)
-      
-      if response = h["openid.provider"]
-        return_to = response["return_to"]
-        raise NoReturnTo if return_to.nil?
-        
-        if OpenID.url_encode(h).size > MAX_REDIRECT_SIZE
-          gen_htmlform(return_to, response)
-        else
-          redirect_res(return_to, response)
-        end
-      else
-        [c,h,b]
-      end
-    end
-
-    def redirect_res(return_to, h)
-      d = URI(return_to)
-      d.query = d.query ? d.query + "&" + OpenID.url_encode(h) : OpenID.url_encode(h)
-      [302, {"Location" => d.to_s, "Content-Type" => "text/plain", "Content-Length" => "0"}, []]
-    end
-    
-    def gen_htmlform(return_to, h)
-      body = "<html><body onload='this.openid_form.submit();'>"
-      body << "<form name='openid_form' method='post' action='#{return_to}'>"
-      body << OpenIDRequest.gen_html_fields(h)
-      body << "<input type='submit' /></form></body></html>"
-      [200, {"Content-Type" => "text/plain", "Content-Length" => body.size}, [body]]
-    end
-    
-    def direct_response(h)
-      body = OpenID.kv_encode(h.merge("ns" => OpenID::NS))
-      [
-        200,
-        {"Content-Type" => "text/plain", "Content-Length" => body.size.to_s},
-        [body]
-      ]
-    end
-
-    def direct_error(error, h = {})
-      error_res = {"mode" => "error", "error" => error}
-      error_res["contact"] = @options["contact"] if @options["contact"]
-      error_res["reference"] = @options["reference"] if @options["reference"]
-      c,h,b = direct_response(error_res.merge(h))
-      [400, h, b]
-    end
   end
   
   class Yadis
