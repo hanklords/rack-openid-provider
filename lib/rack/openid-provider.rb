@@ -398,6 +398,7 @@ module Rack # :nodoc:
     class Associate
       class NotSupported < StandardError; end
       class IncompatibleTypes < StandardError; end
+      class NoSecureChannel < StandardError; end
 
       def initialize(app) @app = app end
       def call(env)
@@ -415,6 +416,7 @@ module Rack # :nodoc:
         
         raise NotSupported if req.session_type.nil? or req.assoc_type.nil?
         raise IncompatibleTypes if !req.session_type.compatible_key_size?(req.assoc_type.size)
+        raise NoSecureChannel if req['session_type'] == "no-encryption" and req.env["rack.url_scheme"] != "https"
 
         mac = req.assoc_type.gen_mac
         handle = OpenID.gen_handle
@@ -431,6 +433,8 @@ module Rack # :nodoc:
         res.error!("session and association types are incompatible")
       rescue NotSupported
         res.error!("session type or association type not supported", "error_code" => "unsupported-type")
+      rescue NoSecureChannel
+        res.error!("\"no-encryption\" session type requested without https connection")
       rescue OpenID::DH::SHA_ANY::MissingKey
         res.error!("dh_consumer_public missing")
       end
