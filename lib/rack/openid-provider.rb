@@ -62,8 +62,6 @@ module OpenID
       end
     end
     
-    def gen_handle; Time.now.utc.iso8601 + OpenID.random_string(6) end
-    def gen_nonce;  Time.now.utc.iso8601 + OpenID.random_string(6) end
   end
 
   module Signatures # :nodoc: all
@@ -417,7 +415,7 @@ module Rack # :nodoc:
         raise NoSecureChannel if req['session_type'] == "no-encryption" and req.env["rack.url_scheme"] != "https"
 
         mac = req.assoc_type.gen_mac
-        handle = OpenID.gen_handle
+        handle = OpenIDProvider.gen_handle
         
         res["assoc_handle"] = handle
         res["session_type"] = req['session_type']
@@ -443,12 +441,13 @@ module Rack # :nodoc:
         elsif res.positive?
           assoc_handle = req.assoc_handle
           mac = req.handles[assoc_handle]
-          if mac.nil? # Generate a mac and invalidate the association handle
+          if mac.nil? or OpenIDProvider.handle_gracetime?(req, assoc_handle)
+            # Handle is too old or unknown
             invalidate_handle = assoc_handle
             mac = OpenID::Signatures["HMAC-SHA256"].gen_mac
-            req.private_handles[assoc_handle = OpenID.gen_handle] = mac
+            req.private_handles[assoc_handle = OpenIDProvider.gen_handle] = mac
           end
-          req.nonces[nonce = OpenID.gen_nonce] = assoc_handle
+          req.nonces[nonce = OpenIDProvider.gen_nonce] = assoc_handle
           
           res["op_endpoint"] = req.options["op_endpoint"] || Request.new(req.env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
           res["return_to"] = req.return_to
@@ -514,15 +513,44 @@ module Rack # :nodoc:
     end
 
     private
-    def clean_handles; end
+    def clean_handles
+      @nonces.delete_if { |k,v|
+        lifetime = OpenIDProvider.handle_lifetime(k) rescue nil
+        lifetime.nil? or lifetime >= @options['nonce_timeout']
+      }
+
+      @private_handles.delete_if { |k,v|
+        lifetime = OpenIDProvider.handle_lifetime(k) rescue nil
+        lifetime.nil? or lifetime >= @options['private_handle_timeout']
+      }
+
+      @handles.delete_if { |k,v|
+        lifetime = OpenIDProvider.handle_lifetime(k) rescue nil
+        lifetime.nil? or lifetime >= @options['handle_timeout'] + @options['private_handle_timeout']
+      }
+    end
+    
     def sev_env(env)
       env['openid.provider.options'] ||= @options
       env['openid.provider.nonces'] ||= @nonces
       env['openid.provider.handles'] ||= @handles
       env['openid.provider.private_handles'] ||= @private_handles      
     end
-  end
 
+    class << self
+      def gen_handle; Time.now.utc.iso8601 + OpenID.random_string(6) end
+      alias :gen_nonce :gen_handle
+      
+      def handle_gracetime?(req, h)
+        handle_lifetime(h) > req.options['handle_timeout']
+      end
+      
+      def handle_lifetime(h)
+        Time.now.utc - (Time.iso8601(h[/^[0-9TZ:-]*Z/]) rescue Time.utc(0))
+      end
+    end
+  end
+      
 end
 
 require 'rack/openid-provider-sreg'
