@@ -515,7 +515,6 @@ module Rack # :nodoc:
     DEFAULT_OPTIONS = {
       'handle_timeout' => 36000, 'private_handle_timeout' => 300, 'nonce_timeout' => 300,
       'handles' => {}, 'private_handles' => {}, 'nonces' => {},
-      'middlewares' => [],
       'xrds' => true
     }
     DEFAULT_MIDDLEWARES = [XRDS, FinishResponse, NotFound, CheckAuthentication, Checkid, Associate]
@@ -523,8 +522,10 @@ module Rack # :nodoc:
     attr_reader :options, :handles, :private_handles, :nonces
     def initialize(app, options = {})
       @options = DEFAULT_OPTIONS.merge(options)
-      @middleware = (DEFAULT_MIDDLEWARES + @options['middlewares']).reverse.inject(app) {|a, m| m.new(a)}
-      @handles, @private_handles, @nonces = @options['handles'], @options['private_handles'], @options['nonces']
+      @middleware = DEFAULT_MIDDLEWARES.reverse.inject(app) {|a, m| m.new(a)}
+      @handles = @options.delete('handles')
+      @private_handles = @options('private_handles')
+      @nonces = @options('nonces')
     end
 
     def call(env)
