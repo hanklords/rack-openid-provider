@@ -365,65 +365,62 @@ module Rack # :nodoc:
       end
     end
     
-    # Finish the response : add error informations and handle direct/indirect response
-    class FinishResponse
-      def initialize(app) @app = app end
-      def call(env)
-        c,h,b = @app.call(env)
-        req = OpenIDRequest.new(env)
-        res = b
-        if OpenIDResponse === res
-          finish_error!(req, res) if res.error?
-          res.indirect!(req.return_to) if indirect?(req, res)
-          res.finish!
-        else
-          [c,h,b]
-        end
-      rescue OpenIDResponse::NoReturnTo => e
-        finish_error!(req, e.res)
-      end
-            
-      def finish_error!(req, res)
-        res["contact"]   = req.options["contact"]   if req.options["contact"]
-        res["reference"] = req.options["reference"] if req.options["reference"]
-        res.finish!
-      end
-      
-      def indirect?(req, res)
-        res.negative? or res.positive? or
-          req.checkid_setup? or req.checkid_immediate? or
-          ((!req.valid? or req.env['HTTP_REFERER']) and req.return_to)
-      end
-    end
-    
-    # Raise an error if the request is a valid OpenID request but no middleware caught it
-    class NotFound
-      def initialize(app) @app = app end
-      def call(env)
-        c,h,b = @app.call(env)
-        req = OpenIDRequest.new(env)
-        if req.valid? and c == 404 and h["X-Cascade"] == "pass"
-          res = OpenIDResponse.new
-          res.error!("Unknown mode")
-        else
-          [c,h,b]
-        end
-      end
-    end
-    
-    class Associate
+    class HandleRequests
       class NotSupported < StandardError; end
       class IncompatibleTypes < StandardError; end
       class NoSecureChannel < StandardError; end
 
       def initialize(app) @app = app end
       def call(env)
-        c,h,b = @app.call(env)
         req = OpenIDRequest.new(env)
-        if req.associate? and c == 404 and h["X-Cascade"] == "pass"
-          associate(req)
+        
+        # Before filters
+        if (req.checkid_setup? or req.checkid_immediate?) and res = check_req(req)
+          c,h,b = res.finish!
         else
-          [c,h,b]
+          c,h,b = @app.call(env)
+        end
+        
+        # After filters
+        if req.valid? and c == 404 and h["X-Cascade"] == "pass"
+          case req.mode
+          when "associate"
+            c,h,b = associate(req)
+          when "checkid_setup", "checkid_immediate"
+            res = OpenIDResponse.new
+            res.negative!
+            c,h,b = finish_checkid! req, res
+          when "check_authentication"
+            c,h,b = check_authentication(req)
+          else
+            c,h,b = OpenIDResponse.new.error!("Unknown mode")
+          end
+        elsif OpenIDResponse === b and (b.negative? or b.positive?)
+          c,h,b = finish_checkid!(req, b)
+        end
+        
+        # Finish filter
+        if OpenIDResponse === b
+          finish_error!(req, b) if b.error?
+          b.indirect!(req.return_to) if indirect?(req, b)
+          c,h,b = b.finish!
+        end
+        [c,h,b]
+      rescue OpenIDResponse::NoReturnTo => e
+        finish_error!(req, e.res)
+      end
+
+      private
+      def check_req(req)
+        res = OpenIDResponse.new
+        if !req.return_to and !req.realm
+          res.error!("The request has no return_to and no realm")
+        elsif req.realm and !req.realm_url
+          res.error!("Invalid realm")
+        elsif !req.realm_match?(req.return_to)
+          res.error!("return_to url does not match the realm")
+        else
+          false
         end
       end
       
@@ -454,24 +451,6 @@ module Rack # :nodoc:
       rescue OpenID::DH::SHA_ANY::MissingKey
         res.error!("dh_consumer_public missing")
       end
-    end
-    
-    class Checkid
-      def initialize(app) @app = app end
-      def call(env)
-        c,h,b = @app.call(env)
-        req = OpenIDRequest.new(env)
-        
-        if (req.checkid_setup? or req.checkid_immediate?) and c == 404 and h["X-Cascade"] == "pass"
-          res = OpenIDResponse.new
-          res.negative!
-          finish_checkid! req, res
-        elsif OpenIDResponse === b and (b.negative? or b.positive?)
-          finish_checkid! req, b
-        else
-          [c,h,b]
-        end
-      end
       
       def finish_checkid!(req, res)
         if res.negative?
@@ -497,45 +476,6 @@ module Rack # :nodoc:
         
         res.finish!
       end
-    end
-
-    class CheckReturnTo
-      def initialize(app) @app = app end
-      def call(env)
-        req = OpenIDRequest.new(env)
-        p req.params
-        if (req.checkid_setup? or req.checkid_immediate?) and res = check_req(req)
-          res.finish!
-        else
-          @app.call(env)
-        end
-      end
-
-      def check_req(req)
-        res = OpenIDResponse.new
-        if !req.return_to and !req.realm
-          res.error!("The request has no return_to and no realm")
-        elsif req.realm and !req.realm_url
-          res.error!("Invalid realm")
-        elsif !req.realm_match?(req.return_to)
-          res.error!("return_to url does not match the realm")
-        else
-          false
-        end
-      end
-    end
-    
-    class CheckAuthentication
-      def initialize(app) @app = app end
-      def call(env)
-        c,h,b = @app.call(env)
-        req = OpenIDRequest.new(env)
-        if req.check_authentication?  and c == 404 and h["X-Cascade"] == "pass"
-          check_authentication(req)
-        else
-          [c,h,b]
-        end
-      end
 
       def check_authentication(req)
         assoc_handle = req.assoc_handle
@@ -551,6 +491,18 @@ module Rack # :nodoc:
           OpenIDResponse.new("is_valid" => "false").finish!
         end
       end
+            
+      def finish_error!(req, res)
+        res["contact"]   = req.options["contact"]   if req.options["contact"]
+        res["reference"] = req.options["reference"] if req.options["reference"]
+        res.finish!
+      end
+      
+      def indirect?(req, res)
+        res.negative? or res.positive? or
+          req.checkid_setup? or req.checkid_immediate? or
+          ((!req.valid? or req.env['HTTP_REFERER']) and req.return_to)
+      end
     end
 
     DEFAULT_OPTIONS = {
@@ -558,7 +510,7 @@ module Rack # :nodoc:
       'handles' => {}, 'private_handles' => {}, 'nonces' => {},
       'xrds' => true
     }
-    DEFAULT_MIDDLEWARES = [XRDS, FinishResponse, NotFound, CheckAuthentication, Checkid, Associate, CheckReturnTo]
+    DEFAULT_MIDDLEWARES = [XRDS, HandleRequests]
 
     attr_reader :options, :handles, :private_handles, :nonces
     def initialize(app, options = {})
