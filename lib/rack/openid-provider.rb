@@ -181,7 +181,23 @@ module Rack # :nodoc:
     def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
     def session_type; OpenID::DH[params['session_type']] end
     def assoc_type; OpenID::Signatures[params['assoc_type']] end
-
+      
+    def realm_wildcard?; params['realm'] =~ %r(^https?://\.\*) end
+    def realm_url; URI(realm.sub(".*", "")) rescue nil end
+    def realm_match?(url)
+      return true if realm.nil? or url.nil?
+      
+      realm = realm_url
+      url = URI(url)
+      !realm.fragment and
+        realm.scheme == url.scheme and
+        realm_wildcard? ? %r(\.?#{Regexp.escape(realm.host)}$) =~ url.host : realm.host == url.host and
+        realm.port == url.port and
+        %r(^#{Regexp.escape(realm.path)}) =~ url.path
+    rescue URI::InvalidURIError
+      false
+    end
+      
     def nonces; @env['openid.provider.nonces'] end
     def handles; @env['openid.provider.handles'] end
     def private_handles; @env['openid.provider.private_handles'] end
@@ -480,7 +496,32 @@ module Rack # :nodoc:
         end
         
         res.finish!
+      end
+    end
 
+    class CheckReturnTo
+      def initialize(app) @app = app end
+      def call(env)
+        req = OpenIDRequest.new(env)
+        p req.params
+        if (req.checkid_setup? or req.checkid_immediate?) and res = check_req(req)
+          res.finish!
+        else
+          @app.call(env)
+        end
+      end
+
+      def check_req(req)
+        res = OpenIDResponse.new
+        if !req.return_to and !req.realm
+          res.error!("The request has no return_to and no realm")
+        elsif req.realm and !req.realm_url
+          res.error!("Invalid realm")
+        elsif !req.realm_match?(req.return_to)
+          res.error!("return_to url does not match the realm")
+        else
+          false
+        end
       end
     end
     
@@ -517,15 +558,15 @@ module Rack # :nodoc:
       'handles' => {}, 'private_handles' => {}, 'nonces' => {},
       'xrds' => true
     }
-    DEFAULT_MIDDLEWARES = [XRDS, FinishResponse, NotFound, CheckAuthentication, Checkid, Associate]
+    DEFAULT_MIDDLEWARES = [XRDS, FinishResponse, NotFound, CheckAuthentication, Checkid, Associate, CheckReturnTo]
 
     attr_reader :options, :handles, :private_handles, :nonces
     def initialize(app, options = {})
       @options = DEFAULT_OPTIONS.merge(options)
       @middleware = DEFAULT_MIDDLEWARES.reverse.inject(app) {|a, m| m.new(a)}
       @handles = @options.delete('handles')
-      @private_handles = @options('private_handles')
-      @nonces = @options('nonces')
+      @private_handles = @options.delete('private_handles')
+      @nonces = @options.delete('nonces')
     end
 
     def call(env)
