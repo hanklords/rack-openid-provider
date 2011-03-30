@@ -136,9 +136,9 @@ module Rack # :nodoc:
   class OpenIDRequest
     FIELDS = %w(
       assoc_handle assoc_type claimed_id contact delegate dh_consumer_public dh_gen
-      dh_modulus error identity invalidate_handle mode ns op_endpoint
-      realm reference response_nonce return_to server session_type sig
-      signed trust_root).freeze
+      dh_modulus error identity invalidate_handle mode ns op_endpoint mac_key
+      realm reference response_nonce return_to server session_type sig dh_server_public
+      signed trust_root expires_in enc_mac_key).freeze
     MODES = %w(associate checkid_setup checkid_immediate check_authentication).freeze
     
     attr_reader :env
@@ -417,10 +417,10 @@ module Rack # :nodoc:
         mac = req.assoc_type.gen_mac
         handle = OpenIDProvider.gen_handle
         
-        res["assoc_handle"] = handle
-        res["session_type"] = req['session_type']
-        res["assoc_type"] = req['assoc_type']
-        res["expires_in"] = req.options['handle_timeout']
+        res.assoc_handle = handle
+        res.session_type = req['session_type']
+        res.assoc_type = req['assoc_type']
+        res.expires_in = req.options['handle_timeout']
         
         res.params.merge! req.session_type.to_hash(mac, req.dh_modulus, req.dh_gen, req.dh_consumer_public)
         req.handles[handle] = mac
@@ -437,8 +437,8 @@ module Rack # :nodoc:
       
       def finish_checkid!(req, res)
         if res.negative?
-          res["mode"] = "setup_needed" if req.checkid_immediate?
-        elsif res.positive?
+          res.mode = "setup_needed" if req.checkid_immediate?
+        elsif res.positive? and !res.sig
           assoc_handle = req.assoc_handle
           mac = req.handles[assoc_handle]
           if mac.nil? or OpenIDProvider.handle_gracetime?(req, assoc_handle)
@@ -449,13 +449,13 @@ module Rack # :nodoc:
           end
           req.nonces[nonce = OpenIDProvider.gen_nonce] = assoc_handle
           
-          res["op_endpoint"] = req.options["op_endpoint"] || Request.new(req.env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
-          res["return_to"] = req.return_to
-          res["response_nonce"] = nonce
-          res["assoc_handle"] = assoc_handle
-          res["invalidate_handle"] = invalidate_handle if invalidate_handle
-          res["signed"] = FIELD_SIGNED.select {|field| res[field] }.join(",")
-          res["sig"] = OpenID.gen_sig(mac, res.params)
+          res.op_endpoint ||= req.options["op_endpoint"] || Request.new(req.env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
+          res.return_to ||= req.return_to
+          res.response_nonce ||= nonce
+          res.assoc_handle ||= assoc_handle
+          res.invalidate_handle ||= invalidate_handle if invalidate_handle
+          res.signed ||= FIELD_SIGNED.select {|field| res[field] }.join(",")
+          res.sig = OpenID.gen_sig(mac, res.params)
         end
         
         res.finish!
@@ -469,7 +469,7 @@ module Rack # :nodoc:
         # Check if assoc_handle, nonce and signature are valid. Then delete the response nonce
         if mac = req.private_handles[assoc_handle] and req.nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, req.params) == req['sig']
           res = OpenIDResponse.new("is_valid" => "true")
-          res["invalidate_handle"] = invalidate_handle if invalidate_handle && req.handles[invalidate_handle].nil?
+          res.invalidate_handle = invalidate_handle if invalidate_handle && req.handles[invalidate_handle].nil?
           res.finish!
         else
           OpenIDResponse.new("is_valid" => "false").finish!
@@ -477,8 +477,8 @@ module Rack # :nodoc:
       end
             
       def finish_error!(req, res)
-        res["contact"]   = req.options["contact"]   if req.options["contact"]
-        res["reference"] = req.options["reference"] if req.options["reference"]
+        res.contact   = req.options["contact"]   if req.options["contact"]
+        res.reference = req.options["reference"] if req.options["reference"]
         res.finish!
       end
       
