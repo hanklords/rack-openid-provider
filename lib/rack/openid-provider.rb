@@ -43,7 +43,7 @@ module Rack
       def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
 
       # Encode in base64
-      def base64_encode(s); [s].pack("m0") end
+      def base64_encode(s); [s.to_s].pack("m0") end
 
       # Decode from base64
       def base64_decode(s); s.unpack("m0").first end
