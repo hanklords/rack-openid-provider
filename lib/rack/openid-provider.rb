@@ -129,15 +129,19 @@ module Rack
           shared = shared_hashed(DEFAULT_MODULUS, DEFAULT_GEN, s)
           sxor(shared_hashed, enc_mac_key)
         end
-        
+
         private
         def size; @digest.new.size end
         def shared_hashed(p, g, c)
-          dh = OpenSSL::PKey::DH.new
-          dh.priv_key = @key.priv_key
-          dh.p = p
-          dh.g = g
-          dh.generate_key!
+          if p =! @key.p or g =! @key.g
+            dh = OpenSSL::PKey::DH.new
+            dh.priv_key = @key.priv_key
+            dh.p = p
+            dh.g = g
+            dh.generate_key!
+          else
+            dh = @key
+          end
           
           s = OpenSSL::BN.new(dh.compute_key(c), 2)
           @digest.digest(OpenID.btwoc(s))
@@ -220,8 +224,13 @@ module Rack
       }
 
       def dh_server_public=(key) params["dh_server_public"] = OpenID.base64_encode(OpenID.btwoc(key)) end
+      def dh_server_public; OpenID.ctwob(OpenID.base64_decode(params["dh_server_public"])) end
       def enc_mac_key=(mac) params["enc_mac_key"] = OpenID.base64_encode(mac) end
+      def enc_mac_key; OpenID.base64_decode(params["enc_mac_key"]) end
       def mac_key=(mac) params["mac_key"] = OpenID.base64_encode(mac) end
+      def mac_key; OpenID.base64_decode(params["mac_key"]) end
+      def session; OpenID::Sessions[session_type] end
+      def assoc; OpenID::Signatures[assoc_type] end
     end
   end
 
