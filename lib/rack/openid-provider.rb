@@ -3,150 +3,150 @@ require 'openssl'
 require 'time'
 require 'uri'
 
-module OpenID
-  VERSION="0.0"
 
-  NS="http://specs.openid.net/auth/2.0".freeze
-  IDENTIFIER_SELECT="http://specs.openid.net/auth/2.0/identifier_select".freeze
-  SERVER="http://specs.openid.net/auth/2.0/server".freeze
-  SIGNON="http://specs.openid.net/auth/2.0/signon".freeze
+module Rack
+  module OpenID
+    VERSION="0.0"
 
-  class << self
-    # Implements OpenID btwoc function
-    def btwoc(n)
-      n = n.to_i
-      raise if n < 0
-      r = (n % 0x100).chr
-      r = (n % 0x100).chr + r while (n /= 0x100) > 0
-      r = 0.chr + r if r[0].ord >= 0x80
-      r
-    end
-    
-    # Inverse form of btwoc
-    def ctwob(s)
-      n, sl = 0, s.length - 1
-      0.upto(sl) {|i|
-        n += s[i].ord * 0x100 ** (sl - i)
-      }
-      n
-    end
+    NS="http://specs.openid.net/auth/2.0".freeze
+    IDENTIFIER_SELECT="http://specs.openid.net/auth/2.0/identifier_select".freeze
+    SERVER="http://specs.openid.net/auth/2.0/server".freeze
+    SIGNON="http://specs.openid.net/auth/2.0/signon".freeze
 
-    # Encode OpenID parameters as a HTTP GET query string
-    def url_encode(h); h.map { |k,v| "openid.#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
-
-    # Encode OpenID parameters as Key-Value format
-    def kv_encode(h); h.map {|k,v| k.to_s + ":" + v.to_s + 10.chr }.join end
-
-    # Decode OpenID parameters from Key-Value format
-    def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
-
-    # Encode in base64
-    def base64_encode(s); [s].pack("m0") end
-
-    # Decode from base64
-    def base64_decode(s); s.unpack("m0").first end
-
-    # Generate _bytes_ random bytes
-    def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes) end
-
-    # Generate a random string _length_ long
-    def random_string(length); random_bytes(length / 2).unpack("H*")[0] end
-
-    # Generate an OpenID signature
-    def gen_sig(mac, params)
-      signed = params["signed"].split(",").map {|k| [k, params[k]]}
-      OpenID.base64_encode(Signatures.sign(mac, kv_encode(signed)))
-    rescue Signatures::NotFound
-      nil
-    end
-    
-  end
-
-  module Signatures # :nodoc: all
-    class NotFound < StandardError; end
-    
-    @list = {}
     class << self
-      attr_reader :list
-      def [](k); @list[k] end
-      def []=(k, v); @list[k] = v end
-        
-      def sign(mac, value)
-        s = Signatures[mac.length]
-        raise NotFound if signature.nil
-        s.sign(mac, value)
+      # Implements OpenID btwoc function
+      def btwoc(n)
+        n = n.to_i
+        raise if n < 0
+        r = (n % 0x100).chr
+        r = (n % 0x100).chr + r while (n /= 0x100) > 0
+        r = 0.chr + r if r[0].ord >= 0x80
+        r
       end
-    end
       
-    class Assoc
-      def initialize(digest); @digest = digest end
-      def sign(mac, value); OpenSSL::HMAC.digest(@digest.new, mac, value) end
-      def size; @digest.new.size end
-      def gen_mac; OpenID.random_bytes(size) end
-    end
-
-    @list["HMAC-SHA1"] = @list[20] = Assoc.new(OpenSSL::Digest::SHA1)
-    @list["HMAC-SHA256"] = @list[32] = Assoc.new(OpenSSL::Digest::SHA256)
-  end
-
-  module Sessions # :nodoc: all
-    DEFAULT_MODULUS=0xDCF93A0B883972EC0E19989AC5A2CE310E1D37717E8D9571BB7623731866E61EF75A2E27898B057F9891C2E27A639C3F29B60814581CD3B2CA3986D2683705577D45C2E7E52DC81C7A171876E5CEA74B1448BFDFAF18828EFD2519F14E45E3826634AF1949E5B535CC829A483B8A76223E5D490A257F05BDFF16F2FB22C583AB
-    DEFAULT_GEN=2
-
-    @list = {}
-    class << self
-      attr_reader :list
-      def [](k); @list[k] end
-      def []=(k, v); @list[k] = v end
-    end
-
-    class SHA_ANY
-      class MissingKey < StandardError; end
-      class InvalidKey < StandardError; end
-
-      def initialize(digest); @digest = digest end
-      def to_hash(mac, p, g, consumer_public_key)
-        raise MissingKey if consumer_public_key.nil?
-        
-        c = OpenSSL::BN.new(consumer_public_key.to_s)
-        raise InvalidKey if mac.size != size or c.size != size
-
-        dh = gen_key(p || DEFAULT_MODULUS, g || DEFAULT_GEN)
-        shared = OpenSSL::BN.new(dh.compute_key(c), 2)
-        shared_hashed = @digest.digest(OpenID.btwoc(shared))
-        {
-          "dh_server_public" => OpenID.base64_encode(OpenID.btwoc(dh.pub_key)),
-          "enc_mac_key" => OpenID.base64_encode(sxor(shared_hashed, mac))
+      # Inverse form of btwoc
+      def ctwob(s)
+        n, sl = 0, s.length - 1
+        0.upto(sl) {|i|
+          n += s[i].ord * 0x100 ** (sl - i)
         }
+        n
       end
 
-      private
-      def size; @digest.new.size end
-      def gen_key(p, g)
-        dh = OpenSSL::PKey::DH.new
-        dh.p = p
-        dh.g = g
-        dh.generate_key!
+      # Encode OpenID parameters as a HTTP GET query string
+      def url_encode(h); h.map { |k,v| "openid.#{Rack::Utils.escape(k)}=#{Rack::Utils.escape(v)}" }.join('&') end
+
+      # Encode OpenID parameters as Key-Value format
+      def kv_encode(h); h.map {|k,v| k.to_s + ":" + v.to_s + 10.chr }.join end
+
+      # Decode OpenID parameters from Key-Value format
+      def kv_decode(s); Hash[*s.split(10.chr).map {|l| l.split(":", 2) }.flatten] end
+
+      # Encode in base64
+      def base64_encode(s); [s].pack("m0") end
+
+      # Decode from base64
+      def base64_decode(s); s.unpack("m0").first end
+
+      # Generate _bytes_ random bytes
+      def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes) end
+
+      # Generate a random string _length_ long
+      def random_string(length); random_bytes(length / 2).unpack("H*")[0] end
+
+      # Generate an OpenID signature
+      def gen_sig(mac, params)
+        signed = params["signed"].split(",").map {|k| [k, params[k]]}
+        base64_encode(Signatures.sign(mac, kv_encode(signed)))
+      rescue Signatures::NotFound
+        nil
       end
       
-      def sxor(s1, s2)
-        s1.bytes.zip(s2.bytes).map { |x,y| x^y }.pack('C*')
+    end
+
+    module Signatures # :nodoc: all
+      class NotFound < StandardError; end
+
+      @list = {}
+      class << self
+        attr_reader :list
+        def [](k); @list[k] end
+        def []=(k, v); @list[k] = v end
+
+        def sign(mac, value)
+          s = Signatures[mac.length]
+          raise NotFound if s.nil?
+          s.sign(mac, value)
+        end
       end
+        
+      class Assoc
+        def initialize(digest); @digest = digest end
+        def sign(mac, value); OpenSSL::HMAC.digest(@digest.new, mac, value) end
+        def size; @digest.new.size end
+        def gen_mac; OpenID.random_bytes(size) end
+      end
+
+      @list["HMAC-SHA1"] = @list[20] = Assoc.new(OpenSSL::Digest::SHA1)
+      @list["HMAC-SHA256"] = @list[32] = Assoc.new(OpenSSL::Digest::SHA256)
     end
 
-    class NoEncryption
-      def self.compatible_key_size?(size); true end
-      def self.to_hash(mac, p, g, c); {"mac_key" => OpenID.base64_encode(mac)} end
+    module Sessions # :nodoc: all
+      DEFAULT_MODULUS=0xDCF93A0B883972EC0E19989AC5A2CE310E1D37717E8D9571BB7623731866E61EF75A2E27898B057F9891C2E27A639C3F29B60814581CD3B2CA3986D2683705577D45C2E7E52DC81C7A171876E5CEA74B1448BFDFAF18828EFD2519F14E45E3826634AF1949E5B535CC829A483B8A76223E5D490A257F05BDFF16F2FB22C583AB
+      DEFAULT_GEN=2
+
+      @list = {}
+      class << self
+        attr_reader :list
+        def [](k); @list[k] end
+        def []=(k, v); @list[k] = v end
+      end
+
+      class SHA_ANY
+        class MissingKey < StandardError; end
+        class InvalidKey < StandardError; end
+
+        def initialize(digest); @digest = digest end
+        def to_hash(mac, p, g, consumer_public_key)
+          raise MissingKey if consumer_public_key.nil?
+          
+          c = OpenSSL::BN.new(consumer_public_key.to_s)
+          raise InvalidKey if mac.size != size or c.size != size
+
+          dh = gen_key(p || DEFAULT_MODULUS, g || DEFAULT_GEN)
+          shared = OpenSSL::BN.new(dh.compute_key(c), 2)
+          shared_hashed = @digest.digest(OpenID.btwoc(shared))
+          {
+            "dh_server_public" => OpenID.base64_encode(OpenID.btwoc(dh.pub_key)),
+            "enc_mac_key" => OpenID.base64_encode(sxor(shared_hashed, mac))
+          }
+        end
+
+        private
+        def size; @digest.new.size end
+        def gen_key(p, g)
+          dh = OpenSSL::PKey::DH.new
+          dh.p = p
+          dh.g = g
+          dh.generate_key!
+        end
+        
+        def sxor(s1, s2)
+          s1.bytes.zip(s2.bytes).map { |x,y| x^y }.pack('C*')
+        end
+      end
+
+      class NoEncryption
+        def self.compatible_key_size?(size); true end
+        def self.to_hash(mac, p, g, c); {"mac_key" => OpenID.base64_encode(mac)} end
+      end
+      
+      @list["DH-SHA1"] = SHA_ANY.new(OpenSSL::Digest::SHA1)
+      @list["DH-SHA256"] = SHA_ANY.new(OpenSSL::Digest::SHA256)
+      @list["no-encryption"] = NoEncryption
     end
-    
-    @list["DH-SHA1"] = SHA_ANY.new(OpenSSL::Digest::SHA1)
-    @list["DH-SHA256"] = SHA_ANY.new(OpenSSL::Digest::SHA256)
-    @list["no-encryption"] = NoEncryption
   end
-end
 
-
-module Rack # :nodoc:
   class OpenIDRequest
     FIELDS = %w(
       assoc_handle assoc_type claimed_id contact delegate dh_consumer_public dh_gen
