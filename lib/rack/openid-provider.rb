@@ -96,15 +96,16 @@ module OpenID
 
     class SHA_ANY
       class MissingKey < StandardError; end
+      class InvalidKey < StandardError; end
 
-      def compatible_key_size?(size); @digest.new.size == size end
       def initialize(digest); @digest = digest end
-
       def to_hash(mac, p, g, consumer_public_key)
-        raise MissingKey if consumer_public_key.nil? or p.nil? or g.nil?
+        raise MissingKey if consumer_public_key.nil?
         
         c = OpenSSL::BN.new(consumer_public_key.to_s)
-        dh = gen_key(p, g)
+        raise InvalidKey if mac.size != @digest.new.size or c.size != @digest.new.size
+
+        dh = gen_key(p || DEFAULT_MODULUS, g || DEFAULT_GEN)
         shared = OpenSSL::BN.new(dh.compute_key(c), 2)
         shared_hashed = @digest.digest(OpenID.btwoc(shared))
         {
@@ -356,7 +357,6 @@ module Rack # :nodoc:
     
     class HandleRequests
       class NotSupported < StandardError; end
-      class IncompatibleTypes < StandardError; end
       class NoSecureChannel < StandardError; end
 
       def initialize(app) @app = app end
@@ -417,7 +417,6 @@ module Rack # :nodoc:
         res = OpenIDResponse.new
         
         raise NotSupported if req.session_type.nil? or req.assoc_type.nil?
-        raise IncompatibleTypes if !req.session_type.compatible_key_size?(req.assoc_type.size)
         raise NoSecureChannel if req['session_type'] == "no-encryption" and req.env["rack.url_scheme"] != "https"
 
         mac = req.assoc_type.gen_mac
@@ -431,7 +430,7 @@ module Rack # :nodoc:
         res.params.merge! req.session_type.to_hash(mac, req.dh_modulus, req.dh_gen, req.dh_consumer_public)
         req.handles[handle] = mac
         res.finish!
-      rescue IncompatibleTypes
+      rescue OpenID::Sessions::SHA_ANY::InvalidKey
         res.error!("session and association types are incompatible")
       rescue NotSupported
         res.error!("session type or association type not supported", "error_code" => "unsupported-type")
