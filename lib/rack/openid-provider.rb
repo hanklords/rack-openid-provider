@@ -225,6 +225,8 @@ module Rack
       def mac_key; OpenID.base64_decode(params["mac_key"]) end
       def session; OpenID::Sessions[session_type] end
       def assoc; OpenID::Signatures[assoc_type] end
+      def signed; (params["signed"] || '').split(",") end
+      def signed=(list) params["signed"] = list.join(",") end
     end
   end
 
@@ -454,6 +456,7 @@ module Rack
         raise NotSupported if req.session.nil? or req.assoc.nil?
         raise NoSecureChannel if !req.session.crypted? and req.env["rack.url_scheme"] != "https"
 
+        # Create an association handle
         mac = req.handles[handle = OpenIDProvider.gen_handle] = req.assoc.gen_mac
         
         res = Response.new
@@ -487,7 +490,7 @@ module Rack
           assoc_handle = req.assoc_handle
           mac = req.handles[assoc_handle]
           if mac.nil? or OpenIDProvider.handle_gracetime?(req, assoc_handle)
-            # Handle is too old or unknown
+            # Handle is too old or unknown, create a private handle and invalidate this one
             invalidate_handle = assoc_handle
             mac = OpenID::Signatures["HMAC-SHA256"].gen_mac
             req.private_handles[assoc_handle = OpenIDProvider.gen_handle] = mac
@@ -499,7 +502,7 @@ module Rack
           res.response_nonce ||= nonce
           res.assoc_handle ||= assoc_handle
           res.invalidate_handle ||= invalidate_handle if invalidate_handle
-          res.signed ||= FIELD_SIGNED.select {|field| res[field] }.join(",")
+          res.signed = FIELD_SIGNED.select {|field| res[field] }
           res.sig = OpenID.gen_sig(mac, res.params)
         end
         
