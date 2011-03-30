@@ -46,7 +46,7 @@ module Rack
       def base64_encode(s); [s.to_s].pack("m0") end
 
       # Decode from base64
-      def base64_decode(s); s.unpack("m0").first end
+      def base64_decode(s); s.to_s.unpack("m0").first end
 
       # Generate _bytes_ random bytes
       def random_bytes(bytes); OpenSSL::Random.random_bytes(bytes) end
@@ -126,7 +126,7 @@ module Rack
         
         def mac(dh_server_public, enc_mac_key)
           s = dh_server_public.to_bn
-          shared = shared_hashed(DEFAULT_MODULUS, DEFAULT_GEN, s)
+          shared_hashed = shared_hashed(DEFAULT_MODULUS, DEFAULT_GEN, s)
           sxor(shared_hashed, enc_mac_key)
         end
 
@@ -145,6 +145,8 @@ module Rack
           
           s = OpenSSL::BN.new(dh.compute_key(c), 2)
           @digest.digest(OpenID.btwoc(s))
+        rescue OpenSSL::PKey::DHError
+          raise InvalidKey
         end
 
         def sxor(s1, s2)
