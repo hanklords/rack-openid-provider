@@ -102,8 +102,8 @@ module Rack
       end
 
       class SHA_ANY
-        class MissingKey < StandardError; end
         class InvalidKey < StandardError; end
+        class InvalidAssociation < StandardError; end
 
         def self.gen_key(p = DEFAULT_MODULUS, g = DEFAULT_GEN)
           dh = OpenSSL::PKey::DH.new
@@ -116,8 +116,8 @@ module Rack
         def pub_key; @key.pub_key end
         def crypted?; true end
         def enc_mac_key(mac, p, g, consumer_public_key)
-          raise MissingKey if consumer_public_key.nil?
-          raise InvalidKey if mac.size != size
+          raise InvalidKey if consumer_public_key.nil?
+          raise InvalidAssociation if mac.size != size
           
           c = consumer_public_key.to_bn
           shared = shared_hashed(p || DEFAULT_MODULUS, g || DEFAULT_GEN, c)
@@ -478,14 +478,14 @@ module Rack
         end
         
         res.finish!
-      rescue OpenID::Sessions::SHA_ANY::InvalidKey
+      rescue OpenID::Sessions::SHA_ANY::InvalidAssociation
         Response.new.error!("session and association types are incompatible")
       rescue NotSupported
         Response.new.error!("session type or association type not supported", "error_code" => "unsupported-type")
       rescue NoSecureChannel
         Response.new.error!("\"no-encryption\" session type requested without https connection")
-      rescue OpenID::Sessions::SHA_ANY::MissingKey
-        Response.new.error!("dh_consumer_public missing")
+      rescue OpenID::Sessions::SHA_ANY::InvalidKey
+        Response.new.error!("bad or missing dh_consumer_public")
       end
       
       def finish_checkid!(req, res)
