@@ -1,9 +1,9 @@
-module ::Rack
+class Rack::OpenIDProvider
 class OpenIDRequest
   class Sreg
     FIELDS = %w(required optional policy_url).freeze
     FIELD_SIGNED = %w(nickname email fullname dob gender postcode country language timezone).freeze
-    FIELD_SIGNED.each { |field| OpenIDProvider::FIELD_SIGNED << "sreg.#{field}" }
+    FIELD_SIGNED.each { |field| Rack::OpenIDProvider::FIELD_SIGNED << "sreg.#{field}" }
     
     def initialize(params) @params = params end
     def required; (@params["sreg.required"] || "").split(",") end

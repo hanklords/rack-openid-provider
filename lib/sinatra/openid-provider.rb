@@ -5,9 +5,9 @@ module Sinatra
   module OpenIDProvider
     
     module Helpers
-      def oip_request; Rack::OpenIDRequest.new(env) end
-      def oip_response; @oip_response ||= Rack::OpenIDResponse.new end
-      def oip_html_fields(h) Rack::OpenIDResponse.gen_html_fields(h) end
+      def oip_request; Rack::OpenIDProvider::OpenIDRequest.new(env) end
+      def oip_response; @oip_response ||= Rack::OpenIDProvider::OpenIDResponse.new end
+      def oip_html_fields(h) Rack::OpenIDProvider::OpenIDResponse.gen_html_fields(h) end
     end
    
     def route_openid(mode, &block)
@@ -23,7 +23,7 @@ module Sinatra
     def check_authentication(&block) route_openid("check_authentication", &block) end
     
     def self.registered(app)
-      app.helpers OpenIDProvider::Helpers
+      app.helpers Helpers
       app.set(:openid_mode) { |value| condition { oip_request.valid? and oip_request.mode == value } }
       app.set(:openid_modes, {})
       

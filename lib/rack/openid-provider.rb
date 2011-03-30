@@ -61,7 +61,6 @@ module Rack
       rescue Signatures::NotFound
         nil
       end
-      
     end
 
     module Signatures # :nodoc: all
@@ -158,190 +157,74 @@ module Rack
       @list["DH-SHA256"] = SHA_ANY.new(key, OpenSSL::Digest::SHA256)
       @list["no-encryption"] = NoEncryption
     end
+    
+    module Request
+      FIELDS = %w(ns mode assoc_type session_type dh_modulus dh_gen dh_consumer_public
+        claimed_id identity assoc_handle return_to realm
+        op_endpoint response_nonce invalidate_handle signed sig).freeze
+      MODES = %w(associate checkid_setup checkid_immediate check_authentication).freeze
+
+      def [](k); params[k] end
+      def []=(k, v); params[k] = v end
+
+      FIELDS.each { |field|
+        class_eval %{def #{field}; params["#{field}"] end}
+        class_eval %{def #{field}=(v); params["#{field}"] = v end}
+      }
+      MODES.each { |field|
+        class_eval %{def #{field}?; valid? and mode == "#{field}" end}
+      }
+
+      # Some accessor helpers
+      def identifier_select?; OpenID::IDENTIFIER_SELECT == identity end
+      def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
+      def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
+      def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
+      def session; OpenID::Sessions[session_type] end
+      def assoc; OpenID::Signatures[assoc_type] end
+
+      def realm_wildcard?; realm =~ %r(^https?://\.\*) end
+      def realm_url; URI(realm.sub(".*", "")) rescue nil end
+      def realm_match?(url)
+        return true if realm.nil? or url.nil?
+
+        realm = realm_url
+        url = URI(url)
+        !realm.fragment and
+          realm.scheme == url.scheme and
+          realm_wildcard? ? %r(\.?#{Regexp.escape(realm.host)}$) =~ url.host : realm.host == url.host and
+          realm.port == url.port and
+          %r(^#{Regexp.escape(realm.path)}) =~ url.path
+      rescue URI::InvalidURIError
+        false
+      end
+    end
+
+    module Response
+      FIELDS = %w(ns assoc_handle session_type assoc_type expires_in
+        mac_key dh_server_public enc_mac_key error error_code mode
+        op_endpoint claimed_id identity return_to response_nonce
+        invalidate_handle signed sig is_valid).freeze
+      MODES = %w(error cancel setup_needed id_res is_valid).freeze
+      MAX_REDIRECT_SIZE = 1024
+      
+      def [](k) params[k] end
+      def []=(k,v) params[k] = v end
+
+      FIELDS.each { |field|
+        class_eval %{def #{field}; params["#{field}"] end}
+        class_eval %{def #{field}=(v); params["#{field}"] = v end}
+      }
+      MODES.each { |field|
+        class_eval %{def #{field}?; mode == "#{field}" end}
+      }
+
+      def dh_server_public=(key) params["dh_server_public"] = OpenID.base64_encode(OpenID.btwoc(key)) end
+      def enc_mac_key=(mac) params["enc_mac_key"] = OpenID.base64_encode(mac) end
+      def mac_key=(mac) params["mac_key"] = OpenID.base64_encode(mac) end
+    end
   end
 
-  class OpenIDRequest
-    FIELDS = %w(ns mode assoc_type session_type dh_modulus dh_gen dh_consumer_public
-      claimed_id identity assoc_handle return_to realm
-      op_endpoint response_nonce invalidate_handle signed sig).freeze
-    MODES = %w(associate checkid_setup checkid_immediate check_authentication).freeze
-    
-    attr_reader :env
-    def initialize(env) @env = env end
-
-    def params; @env['openid.provider.request.params'] ||= extract_open_id_params end
-    def [](k); params[k] end
-    def []=(k, v); params[k] = v end
-      
-    # Some accessor helpers
-    FIELDS.each { |field|
-      class_eval %{def #{field}; params["#{field}"] end}
-      class_eval %{def #{field}=(v); params["#{field}"] = v end}
-    }
-    MODES.each { |field|
-      class_eval %{def #{field}?; valid? and mode == "#{field}" end}
-    }
-    
-    def valid?; mode and Request.new(@env).path_info == "/" end
-    def identifier_select?; OpenID::IDENTIFIER_SELECT == identity end
-    def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
-    def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
-    def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
-    def session; OpenID::Sessions[session_type] end
-    def assoc; OpenID::Signatures[assoc_type] end
-      
-    def realm_wildcard?; realm =~ %r(^https?://\.\*) end
-    def realm_url; URI(realm.sub(".*", "")) rescue nil end
-    def realm_match?(url)
-      return true if realm.nil? or url.nil?
-      
-      realm = realm_url
-      url = URI(url)
-      !realm.fragment and
-        realm.scheme == url.scheme and
-        realm_wildcard? ? %r(\.?#{Regexp.escape(realm.host)}$) =~ url.host : realm.host == url.host and
-        realm.port == url.port and
-        %r(^#{Regexp.escape(realm.path)}) =~ url.path
-    rescue URI::InvalidURIError
-      false
-    end
-      
-    def nonces; @env['openid.provider.nonces'] end
-    def handles; @env['openid.provider.handles'] end
-    def private_handles; @env['openid.provider.private_handles'] end
-    def options; @env['openid.provider.options'] end
-    
-    private
-    def extract_open_id_params
-      openid_params = {}
-      Request.new(@env).params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
-      openid_params
-    end
-  end
-  
-  class OpenIDResponse
-    class NoReturnTo < StandardError
-      attr_reader :res
-      def initialize(res)
-        @res = res
-        res.error!("no return_to", "orig_mode" => @res["mode"]) if not res.error?
-      end
-    end
-
-    def self.gen_html_fields(h)
-      h.map {|k,v|
-        "<input type='hidden' name='openid.#{k}' value='#{v}' />"
-      }.join("\n")
-    end
-
-    FIELDS = %w(ns assoc_handle session_type assoc_type expires_in
-      mac_key dh_server_public enc_mac_key error error_code mode
-      op_endpoint claimed_id identity return_to response_nonce
-      invalidate_handle signed sig is_valid).freeze
-    MODES = %w(error cancel setup_needed id_res is_valid).freeze
-    MAX_REDIRECT_SIZE = 1024
-    
-    def [](k) @h[k] end
-    def []=(k,v) @h[k] = v end
-    def params; @h end
-          
-    def initialize(h = {})
-      @h = h.merge("ns" => OpenID::NS)
-      @direct = true
-      @return_to = nil
-    end
-
-    FIELDS.each { |field|
-      class_eval %{def #{field}; params["#{field}"] end}
-      class_eval %{def #{field}=(v); params["#{field}"] = v end}
-    }
-    MODES.each { |field|
-      class_eval %{def #{field}?; mode == "#{field}" end}
-    }
-
-    def dh_server_public=(key) params["dh_server_public"] = OpenID.base64_encode(OpenID.btwoc(key)) end
-    def enc_mac_key=(mac) params["enc_mac_key"] = OpenID.base64_encode(mac) end
-    def mac_key=(mac) params["mac_key"] = OpenID.base64_encode(mac) end
-
-    def direct?; @direct end
-    def direct!; @direct = true end
-      
-    def indirect?; !direct? end
-    def indirect!(return_to)
-      raise NoReturnTo.new(self) if return_to.nil?
-      @return_to = return_to
-      @direct = false 
-    end
-    
-    def html_form?; indirect? and OpenID.url_encode(@h).size > MAX_REDIRECT_SIZE end
-    def redirect?; !html_form? end
-    def negative?; cancel? or setup_needed? end
-    def positive?; id_res? end
-
-    def error!(error, h = {})
-      @h.merge!(h)
-      @h.merge! "mode" => "error", "error" => error
-      finish!
-    end
-    
-    def negative!(h = {})
-      @h.merge!(h)
-      @h["mode"] = "cancel"
-      finish!
-    end
-        
-    def positive!(h = {})
-      @h.merge!(h)
-      @h["mode"] = "id_res"
-      finish!
-    end
-    
-    def http_status
-      if direct?
-         error? ? 400 : 200
-      else
-        html_form? ? 200 : 302
-      end
-    end
-    
-    def http_headers
-      headers = {"Content-Type" => "text/plain"}
-      headers.merge!("Content-Length" => http_body.size.to_s)
-      if direct?
-        headers
-      else
-        if html_form?
-          headers.merge!("Content-Type" => "text/html")
-        else
-          d = URI(@return_to)
-          d.query = d.query ? d.query + "&" + OpenID.url_encode(@h) : OpenID.url_encode(@h)
-          headers.merge!("Location" => d.to_s)
-        end
-      end
-    end
-    
-    def http_body
-      if direct?
-        OpenID.kv_encode(@h)
-      else
-        if html_form?
-          %(
-<html><body onload='this.openid_form.submit();'>
-<form name='openid_form' method='post' action='#{@return_to}'>"
-#{OpenIDResponse.gen_html_fields(@h)}
-<input type='submit' /></form></body></html>
-          )
-        else
-          ""
-        end
-      end
-    end
-
-    def each; yield http_body end
-    def finish!; [http_status, http_headers, self] end
-    alias :to_a :finish!
-  end
-  
   # This is a Rack middleware:
   #   Rack::Builder.new {
   #     use Rack::OpenIDProvider, custom_options
@@ -349,6 +232,131 @@ module Rack
   #   }
   class OpenIDProvider
     FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
+
+    class OpenIDRequest
+      include OpenID::Request
+
+      attr_reader :env
+      def initialize(env) @env = env end
+
+      def valid?; mode and Request.new(@env).path_info == "/" end
+      def params; @env['openid.provider.request.params'] ||= extract_open_id_params end
+      def nonces; @env['openid.provider.nonces'] end
+      def handles; @env['openid.provider.handles'] end
+      def private_handles; @env['openid.provider.private_handles'] end
+      def options; @env['openid.provider.options'] end
+
+      private
+      def extract_open_id_params
+        openid_params = {}
+        Request.new(@env).params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
+        openid_params
+      end
+    end
+    
+    class OpenIDResponse
+      include OpenID::Response
+      
+      class NoReturnTo < StandardError
+        attr_reader :res
+        def initialize(res)
+          @res = res
+          res.error!("no return_to", "orig_mode" => @res["mode"]) if not res.error?
+        end
+      end
+
+      def self.gen_html_fields(h)
+        h.map {|k,v|
+          "<input type='hidden' name='openid.#{k}' value='#{v}' />"
+        }.join("\n")
+      end
+
+      def params; @h end
+      def initialize(h = {})
+        @h = h.merge("ns" => OpenID::NS)
+        @direct = true
+        @return_to = nil
+      end
+
+
+      def direct?; @direct end
+      def direct!; @direct = true end
+        
+      def indirect?; !direct? end
+      def indirect!(return_to)
+        raise NoReturnTo.new(self) if return_to.nil?
+        @return_to = return_to
+        @direct = false 
+      end
+      
+      def html_form?; indirect? and OpenID.url_encode(@h).size > MAX_REDIRECT_SIZE end
+      def redirect?; !html_form? end
+      def negative?; cancel? or setup_needed? end
+      def positive?; id_res? end
+
+      def error!(error, h = {})
+        @h.merge!(h)
+        @h.merge! "mode" => "error", "error" => error
+        finish!
+      end
+      
+      def negative!(h = {})
+        @h.merge!(h)
+        @h["mode"] = "cancel"
+        finish!
+      end
+          
+      def positive!(h = {})
+        @h.merge!(h)
+        @h["mode"] = "id_res"
+        finish!
+      end
+      
+      def http_status
+        if direct?
+          error? ? 400 : 200
+        else
+          html_form? ? 200 : 302
+        end
+      end
+      
+      def http_headers
+        headers = {"Content-Type" => "text/plain"}
+        headers.merge!("Content-Length" => http_body.size.to_s)
+        if direct?
+          headers
+        else
+          if html_form?
+            headers.merge!("Content-Type" => "text/html")
+          else
+            d = URI(@return_to)
+            d.query = d.query ? d.query + "&" + OpenID.url_encode(@h) : OpenID.url_encode(@h)
+            headers.merge!("Location" => d.to_s)
+          end
+        end
+      end
+      
+      def http_body
+        if direct?
+          OpenID.kv_encode(@h)
+        else
+          if html_form?
+            %(
+  <html><body onload='this.openid_form.submit();'>
+  <form name='openid_form' method='post' action='#{@return_to}'>"
+  #{OpenIDResponse.gen_html_fields(@h)}
+  <input type='submit' /></form></body></html>
+            )
+          else
+            ""
+          end
+        end
+      end
+
+      def each; yield http_body end
+      def finish!; [http_status, http_headers, self] end
+      alias :to_a :finish!
+    end
 
     class XRDS
       CONTENT_TYPE = "application/xrds+xml".freeze
@@ -551,11 +559,9 @@ module Rack
       @nonces.delete_if { |k,v|
         OpenIDProvider.handle_lifetime(k) >= @options['nonce_timeout']
       }
-
       @private_handles.delete_if { |k,v|
         OpenIDProvider.handle_lifetime(k) >= @options['private_handle_timeout']
       }
-
       @handles.delete_if { |k,v|
         OpenIDProvider.handle_lifetime(k) >= @options['handle_timeout'] + @options['private_handle_timeout']
       }
