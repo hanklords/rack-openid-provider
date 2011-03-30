@@ -515,18 +515,15 @@ module Rack # :nodoc:
     private
     def clean_handles
       @nonces.delete_if { |k,v|
-        lifetime = OpenIDProvider.handle_lifetime(k) rescue nil
-        lifetime.nil? or lifetime >= @options['nonce_timeout']
+        OpenIDProvider.handle_lifetime(k) >= @options['nonce_timeout']
       }
 
       @private_handles.delete_if { |k,v|
-        lifetime = OpenIDProvider.handle_lifetime(k) rescue nil
-        lifetime.nil? or lifetime >= @options['private_handle_timeout']
+        OpenIDProvider.handle_lifetime(k) >= @options['private_handle_timeout']
       }
 
       @handles.delete_if { |k,v|
-        lifetime = OpenIDProvider.handle_lifetime(k) rescue nil
-        lifetime.nil? or lifetime >= @options['handle_timeout'] + @options['private_handle_timeout']
+        OpenIDProvider.handle_lifetime(k) >= @options['handle_timeout'] + @options['private_handle_timeout']
       }
     end
     
