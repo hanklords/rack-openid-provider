@@ -5,9 +5,9 @@ module Sinatra
   module OpenIDProvider
     
     module Helpers
-      def oip_request; Rack::OpenIDProvider::OpenIDRequest.new(env) end
-      def oip_response; @oip_response ||= Rack::OpenIDProvider::OpenIDResponse.new end
-      def oip_html_fields(h) Rack::OpenIDProvider::OpenIDResponse.gen_html_fields(h) end
+      def oip_request; Rack::OpenIDProvider::Request.new(env) end
+      def oip_response; @oip_response ||= Rack::OpenIDProvider::Response.new end
+      def oip_html_fields(h) Rack::OpenIDProvider::Response.gen_html_fields(h) end
     end
    
     def route_openid(mode, &block)

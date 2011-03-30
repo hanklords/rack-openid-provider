@@ -233,13 +233,13 @@ module Rack
   class OpenIDProvider
     FIELD_SIGNED = %w(op_endpoint return_to response_nonce assoc_handle claimed_id identity)
 
-    class OpenIDRequest
+    class Request
       include OpenID::Request
 
       attr_reader :env
       def initialize(env) @env = env end
 
-      def valid?; mode and Request.new(@env).path_info == "/" end
+      def valid?; mode and Rack::Request.new(@env).path_info == "/" end
       def params; @env['openid.provider.request.params'] ||= extract_open_id_params end
       def nonces; @env['openid.provider.nonces'] end
       def handles; @env['openid.provider.handles'] end
@@ -249,12 +249,12 @@ module Rack
       private
       def extract_open_id_params
         openid_params = {}
-        Request.new(@env).params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
+        Rack::Request.new(@env).params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
         openid_params
       end
     end
     
-    class OpenIDResponse
+    class Response
       include OpenID::Response
       
       class NoReturnTo < StandardError
@@ -344,7 +344,7 @@ module Rack
             %(
   <html><body onload='this.openid_form.submit();'>
   <form name='openid_form' method='post' action='#{@return_to}'>"
-  #{OpenIDResponse.gen_html_fields(@h)}
+  #{Response.gen_html_fields(@h)}
   <input type='submit' /></form></body></html>
             )
           else
@@ -382,7 +382,7 @@ module Rack
       end
       
       def serve?(env)
-        req, oreq = Request.new(env), OpenIDRequest.new(env)
+        req, oreq = Rack::Request.new(env), Request.new(env)
         !oreq.valid? and oreq.options['xrds'] and 
           (req.path_info == "/" or req.path == "/") and
           env['HTTP_ACCEPT'].include?(CONTENT_TYPE)
@@ -395,7 +395,7 @@ module Rack
 
       def initialize(app) @app = app end
       def call(env)
-        req = OpenIDRequest.new(env)
+        req = Request.new(env)
         
         # Before filters
         if (req.checkid_setup? or req.checkid_immediate?) and res = check_req(req)
@@ -410,32 +410,32 @@ module Rack
           when "associate"
             c,h,b = associate(req)
           when "checkid_setup", "checkid_immediate"
-            res = OpenIDResponse.new
+            res = Response.new
             res.negative!
             c,h,b = finish_checkid! req, res
           when "check_authentication"
             c,h,b = check_authentication(req)
           else
-            c,h,b = OpenIDResponse.new.error!("Unknown mode")
+            c,h,b = Response.new.error!("Unknown mode")
           end
-        elsif OpenIDResponse === b and (b.negative? or b.positive?)
+        elsif Response === b and (b.negative? or b.positive?)
           c,h,b = finish_checkid!(req, b)
         end
         
         # Finish filter
-        if OpenIDResponse === b
+        if Response === b
           finish_error!(req, b) if b.error?
           b.indirect!(req.return_to) if indirect?(req, b)
           c,h,b = b.finish!
         end
         [c,h,b]
-      rescue OpenIDResponse::NoReturnTo => e
+      rescue Response::NoReturnTo => e
         finish_error!(req, e.res)
       end
 
       private
       def check_req(req)
-        res = OpenIDResponse.new
+        res = Response.new
         if !req.return_to and !req.realm
           res.error!("The request has no return_to and no realm")
         elsif req.realm and !req.realm_url
@@ -453,7 +453,7 @@ module Rack
 
         mac = req.handles[handle = OpenIDProvider.gen_handle] = req.assoc.gen_mac
         
-        res = OpenIDResponse.new
+        res = Response.new
         res.assoc_handle = handle
         res.session_type = req.session_type
         res.assoc_type = req.assoc_type
@@ -468,13 +468,13 @@ module Rack
         
         res.finish!
       rescue OpenID::Sessions::SHA_ANY::InvalidKey
-        OpenIDResponse.new.error!("session and association types are incompatible")
+        Response.new.error!("session and association types are incompatible")
       rescue NotSupported
-        OpenIDResponse.new.error!("session type or association type not supported", "error_code" => "unsupported-type")
+        Response.new.error!("session type or association type not supported", "error_code" => "unsupported-type")
       rescue NoSecureChannel
-        OpenIDResponse.new.error!("\"no-encryption\" session type requested without https connection")
+        Response.new.error!("\"no-encryption\" session type requested without https connection")
       rescue OpenID::Sessions::SHA_ANY::MissingKey
-        OpenIDResponse.new.error!("dh_consumer_public missing")
+        Response.new.error!("dh_consumer_public missing")
       end
       
       def finish_checkid!(req, res)
@@ -491,7 +491,7 @@ module Rack
           end
           req.nonces[nonce = OpenIDProvider.gen_nonce] = assoc_handle
           
-          res.op_endpoint ||= req.options["op_endpoint"] || Request.new(req.env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
+          res.op_endpoint ||= req.options["op_endpoint"] || Rack::Request.new(req.env.merge("PATH_INFO" => "/", "QUERY_STRING" => "")).url
           res.return_to ||= req.return_to
           res.response_nonce ||= nonce
           res.assoc_handle ||= assoc_handle
@@ -510,11 +510,11 @@ module Rack
 
         # Check if assoc_handle, nonce and signature are valid. Then delete the response nonce
         if mac = req.private_handles[assoc_handle] and req.nonces.delete(nonce) == assoc_handle and OpenID.gen_sig(mac, req.params) == req['sig']
-          res = OpenIDResponse.new("is_valid" => "true")
+          res = Response.new("is_valid" => "true")
           res.invalidate_handle = invalidate_handle if invalidate_handle && req.handles[invalidate_handle].nil?
           res.finish!
         else
-          OpenIDResponse.new("is_valid" => "false").finish!
+          Response.new("is_valid" => "false").finish!
         end
       end
             
