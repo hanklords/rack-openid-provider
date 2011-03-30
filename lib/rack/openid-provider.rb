@@ -106,31 +106,49 @@ module Rack
         class MissingKey < StandardError; end
         class InvalidKey < StandardError; end
 
-        def initialize(digest); @digest = digest end
-        def to_hash(mac, p, g, consumer_public_key)
-          raise MissingKey if consumer_public_key.nil?
-          
-          c = OpenSSL::BN.new(consumer_public_key.to_s)
-          raise InvalidKey if mac.size != size or c.size != size
-
-          dh = gen_key(p || DEFAULT_MODULUS, g || DEFAULT_GEN)
-          shared = OpenSSL::BN.new(dh.compute_key(c), 2)
-          shared_hashed = @digest.digest(OpenID.btwoc(shared))
-          {
-            "dh_server_public" => OpenID.base64_encode(OpenID.btwoc(dh.pub_key)),
-            "enc_mac_key" => OpenID.base64_encode(sxor(shared_hashed, mac))
-          }
-        end
-
-        private
-        def size; @digest.new.size end
-        def gen_key(p, g)
+        def self.gen_key(p = DEFAULT_MODULUS, g = DEFAULT_GEN)
           dh = OpenSSL::PKey::DH.new
           dh.p = p
           dh.g = g
           dh.generate_key!
         end
+
+        def initialize(key, digest); @key, @digest = key, digest end
+        def pub_key; OpenID.btwoc(@key.pub_key) end
+        def to_hash(mac, p, g, consumer_public_key)
+          raise MissingKey if consumer_public_key.nil?
+          
+          c = consumer_public_key.to_bn
+          raise InvalidKey if mac.size != size
+
+          shared = shared(p || DEFAULT_MODULUS, g || DEFAULT_GEN, c)
+          shared_hashed = @digest.digest(shared)
+          {
+            "dh_server_public" => OpenID.base64_encode(pub_key),
+            "enc_mac_key" => OpenID.base64_encode(sxor(shared_hashed, mac))
+          }
+        end
         
+        def mac(dh_server_public, enc_mac_key)
+          s = dh_server_public.to_bn
+          shared = shared(DEFAULT_MODULUS, DEFAULT_GEN, s)
+          shared_hashed = @digest.digest(shared)
+          sxor(shared_hashed, enc_mac_key)
+        end
+        
+        private
+        def size; @digest.new.size end
+        def shared(p, g, c)
+          dh = OpenSSL::PKey::DH.new
+          dh.priv_key = @key.priv_key
+          dh.p = p
+          dh.g = g
+          dh.generate_key!
+          
+          s = OpenSSL::BN.new(dh.compute_key(c), 2)
+          OpenID.btwoc(s)
+        end
+
         def sxor(s1, s2)
           s1.bytes.zip(s2.bytes).map { |x,y| x^y }.pack('C*')
         end
@@ -141,8 +159,9 @@ module Rack
         def self.to_hash(mac, p, g, c); {"mac_key" => OpenID.base64_encode(mac)} end
       end
       
-      @list["DH-SHA1"] = SHA_ANY.new(OpenSSL::Digest::SHA1)
-      @list["DH-SHA256"] = SHA_ANY.new(OpenSSL::Digest::SHA256)
+      key = SHA_ANY.gen_key
+      @list["DH-SHA1"] = SHA_ANY.new(key, OpenSSL::Digest::SHA1)
+      @list["DH-SHA256"] = SHA_ANY.new(key, OpenSSL::Digest::SHA256)
       @list["no-encryption"] = NoEncryption
     end
   end
