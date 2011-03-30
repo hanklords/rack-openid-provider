@@ -105,10 +105,11 @@ module Rack
         class InvalidKey < StandardError; end
         class InvalidAssociation < StandardError; end
 
-        def self.gen_key(p = DEFAULT_MODULUS, g = DEFAULT_GEN)
+        def self.gen_key(p = DEFAULT_MODULUS, g = DEFAULT_GEN, priv_key = nil)
           dh = OpenSSL::PKey::DH.new
           dh.p = p
           dh.g = g
+          dh.priv_key = priv_key
           dh.generate_key!
         end
 
@@ -133,16 +134,7 @@ module Rack
         private
         def size; @digest.new.size end
         def shared_hashed(p, g, c)
-          if p =! @key.p or g =! @key.g
-            dh = OpenSSL::PKey::DH.new
-            dh.priv_key = @key.priv_key
-            dh.p = p
-            dh.g = g
-            dh.generate_key!
-          else
-            dh = @key
-          end
-          
+          dh = (p == @key.p and g == @key.g) ? @key : SHA_ANY.gen_key(p, g, @key.priv_key)
           s = OpenSSL::BN.new(dh.compute_key(c), 2)
           @digest.digest(OpenID.btwoc(s))
         rescue OpenSSL::PKey::DHError
