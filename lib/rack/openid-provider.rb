@@ -79,8 +79,8 @@ module OpenID
       def gen_mac; OpenID.random_bytes(size) end
     end
 
-    @list["HMAC-SHA1"] = Assoc.new(OpenSSL::Digest::SHA1)
-    @list["HMAC-SHA256"] = Assoc.new(OpenSSL::Digest::SHA256)
+    @list["HMAC-SHA1"] = @list[20] = Assoc.new(OpenSSL::Digest::SHA1)
+    @list["HMAC-SHA256"] = @list[32] = Assoc.new(OpenSSL::Digest::SHA256)
   end
 
   module Sessions # :nodoc: all
@@ -103,7 +103,7 @@ module OpenID
         raise MissingKey if consumer_public_key.nil?
         
         c = OpenSSL::BN.new(consumer_public_key.to_s)
-        raise InvalidKey if mac.size != @digest.new.size or c.size != @digest.new.size
+        raise InvalidKey if mac.size != size or c.size != size
 
         dh = gen_key(p || DEFAULT_MODULUS, g || DEFAULT_GEN)
         shared = OpenSSL::BN.new(dh.compute_key(c), 2)
@@ -115,6 +115,7 @@ module OpenID
       end
 
       private
+      def size; @digest.new.size end
       def gen_key(p, g)
         dh = OpenSSL::PKey::DH.new
         dh.p = p
