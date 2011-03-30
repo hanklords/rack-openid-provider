@@ -114,31 +114,26 @@ module Rack
         end
 
         def initialize(key, digest); @key, @digest = key, digest end
-        def pub_key; OpenID.btwoc(@key.pub_key) end
-        def to_hash(mac, p, g, consumer_public_key)
+        def pub_key; @key.pub_key end
+        def crypted?; true end
+        def enc_mac_key(mac, p, g, consumer_public_key)
           raise MissingKey if consumer_public_key.nil?
+          raise InvalidKey if mac.size != size
           
           c = consumer_public_key.to_bn
-          raise InvalidKey if mac.size != size
-
-          shared = shared(p || DEFAULT_MODULUS, g || DEFAULT_GEN, c)
-          shared_hashed = @digest.digest(shared)
-          {
-            "dh_server_public" => OpenID.base64_encode(pub_key),
-            "enc_mac_key" => OpenID.base64_encode(sxor(shared_hashed, mac))
-          }
+          shared = shared_hashed(p || DEFAULT_MODULUS, g || DEFAULT_GEN, c)
+          sxor(shared, mac)
         end
         
         def mac(dh_server_public, enc_mac_key)
           s = dh_server_public.to_bn
-          shared = shared(DEFAULT_MODULUS, DEFAULT_GEN, s)
-          shared_hashed = @digest.digest(shared)
+          shared = shared_hashed(DEFAULT_MODULUS, DEFAULT_GEN, s)
           sxor(shared_hashed, enc_mac_key)
         end
         
         private
         def size; @digest.new.size end
-        def shared(p, g, c)
+        def shared_hashed(p, g, c)
           dh = OpenSSL::PKey::DH.new
           dh.priv_key = @key.priv_key
           dh.p = p
@@ -146,7 +141,7 @@ module Rack
           dh.generate_key!
           
           s = OpenSSL::BN.new(dh.compute_key(c), 2)
-          OpenID.btwoc(s)
+          @digest.digest(OpenID.btwoc(s))
         end
 
         def sxor(s1, s2)
@@ -155,8 +150,7 @@ module Rack
       end
 
       class NoEncryption
-        def self.compatible_key_size?(size); true end
-        def self.to_hash(mac, p, g, c); {"mac_key" => OpenID.base64_encode(mac)} end
+        def self.crypted?; false end
       end
       
       key = SHA_ANY.gen_key
@@ -167,11 +161,9 @@ module Rack
   end
 
   class OpenIDRequest
-    FIELDS = %w(
-      assoc_handle assoc_type claimed_id contact delegate dh_consumer_public dh_gen
-      dh_modulus error identity invalidate_handle mode ns op_endpoint mac_key
-      realm reference response_nonce return_to server session_type sig dh_server_public
-      signed trust_root expires_in enc_mac_key).freeze
+    FIELDS = %w(ns mode assoc_type session_type dh_modulus dh_gen dh_consumer_public
+      claimed_id identity assoc_handle return_to realm
+      op_endpoint response_nonce invalidate_handle signed sig).freeze
     MODES = %w(associate checkid_setup checkid_immediate check_authentication).freeze
     
     attr_reader :env
@@ -195,10 +187,10 @@ module Rack
     def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
     def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
     def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
-    def session_type; OpenID::Sessions[params['session_type']] end
-    def assoc_type; OpenID::Signatures[params['assoc_type']] end
+    def session; OpenID::Sessions[session_type] end
+    def assoc; OpenID::Signatures[assoc_type] end
       
-    def realm_wildcard?; params['realm'] =~ %r(^https?://\.\*) end
+    def realm_wildcard?; realm =~ %r(^https?://\.\*) end
     def realm_url; URI(realm.sub(".*", "")) rescue nil end
     def realm_match?(url)
       return true if realm.nil? or url.nil?
@@ -235,34 +227,42 @@ module Rack
         res.error!("no return_to", "orig_mode" => @res["mode"]) if not res.error?
       end
     end
-    
-    MODES = %w(error cancel setup_needed id_res is_valid)
-    MAX_REDIRECT_SIZE = 1024
-   
+
     def self.gen_html_fields(h)
       h.map {|k,v|
         "<input type='hidden' name='openid.#{k}' value='#{v}' />"
       }.join("\n")
     end
+
+    FIELDS = %w(ns assoc_handle session_type assoc_type expires_in
+      mac_key dh_server_public enc_mac_key error error_code mode
+      op_endpoint claimed_id identity return_to response_nonce
+      invalidate_handle signed sig is_valid).freeze
+    MODES = %w(error cancel setup_needed id_res is_valid).freeze
+    MAX_REDIRECT_SIZE = 1024
     
-    OpenIDRequest::FIELDS.each { |field|
+    def [](k) @h[k] end
+    def []=(k,v) @h[k] = v end
+    def params; @h end
+          
+    def initialize(h = {})
+      @h = h.merge("ns" => OpenID::NS)
+      @direct = true
+      @return_to = nil
+    end
+
+    FIELDS.each { |field|
       class_eval %{def #{field}; params["#{field}"] end}
       class_eval %{def #{field}=(v); params["#{field}"] = v end}
     }
     MODES.each { |field|
       class_eval %{def #{field}?; mode == "#{field}" end}
     }
-    
-    def initialize(h = {})
-      @h = h.merge("ns" => OpenID::NS)
-      @direct = true
-      @return_to = nil
-    end
-    
-    def [](k) @h[k] end
-    def []=(k,v) @h[k] = v end
-    def params; @h end
-      
+
+    def dh_server_public=(key) params["dh_server_public"] = OpenID.base64_encode(OpenID.btwoc(key)) end
+    def enc_mac_key=(mac) params["enc_mac_key"] = OpenID.base64_encode(mac) end
+    def mac_key=(mac) params["mac_key"] = OpenID.base64_encode(mac) end
+
     def direct?; @direct end
     def direct!; @direct = true end
       
@@ -440,30 +440,33 @@ module Rack
       end
       
       def associate(req)
-        res = OpenIDResponse.new
-        
-        raise NotSupported if req.session_type.nil? or req.assoc_type.nil?
-        raise NoSecureChannel if req['session_type'] == "no-encryption" and req.env["rack.url_scheme"] != "https"
+        raise NotSupported if req.session.nil? or req.assoc.nil?
+        raise NoSecureChannel if !req.session.crypted? and req.env["rack.url_scheme"] != "https"
 
-        mac = req.assoc_type.gen_mac
-        handle = OpenIDProvider.gen_handle
+        mac = req.handles[handle = OpenIDProvider.gen_handle] = req.assoc.gen_mac
         
+        res = OpenIDResponse.new
         res.assoc_handle = handle
-        res.session_type = req['session_type']
-        res.assoc_type = req['assoc_type']
+        res.session_type = req.session_type
+        res.assoc_type = req.assoc_type
         res.expires_in = req.options['handle_timeout']
         
-        res.params.merge! req.session_type.to_hash(mac, req.dh_modulus, req.dh_gen, req.dh_consumer_public)
-        req.handles[handle] = mac
+        if req.session.crypted?
+          res.dh_server_public = req.session.pub_key
+          res.enc_mac_key = req.session.enc_mac_key(mac, req.dh_modulus, req.dh_gen, req.dh_consumer_public)
+        else
+          res.mac_key = mac
+        end
+        
         res.finish!
       rescue OpenID::Sessions::SHA_ANY::InvalidKey
-        res.error!("session and association types are incompatible")
+        OpenIDResponse.new.error!("session and association types are incompatible")
       rescue NotSupported
-        res.error!("session type or association type not supported", "error_code" => "unsupported-type")
+        OpenIDResponse.new.error!("session type or association type not supported", "error_code" => "unsupported-type")
       rescue NoSecureChannel
-        res.error!("\"no-encryption\" session type requested without https connection")
+        OpenIDResponse.new.error!("\"no-encryption\" session type requested without https connection")
       rescue OpenID::Sessions::SHA_ANY::MissingKey
-        res.error!("dh_consumer_public missing")
+        OpenIDResponse.new.error!("dh_consumer_public missing")
       end
       
       def finish_checkid!(req, res)
