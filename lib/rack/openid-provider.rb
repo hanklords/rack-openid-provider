@@ -55,21 +55,27 @@ module OpenID
     # Generate an OpenID signature
     def gen_sig(mac, params)
       signed = params["signed"].split(",").map {|k| [k, params[k]]}
-      if mac.length == 20
-        OpenID.base64_encode(Signatures["HMAC-SHA1"].sign(  mac, kv_encode(signed)))
-      else
-        OpenID.base64_encode(Signatures["HMAC-SHA256"].sign(mac, kv_encode(signed)))
-      end
+      OpenID.base64_encode(Signatures.sign(mac, kv_encode(signed)))
+    rescue Signatures::NotFound
+      nil
     end
     
   end
 
   module Signatures # :nodoc: all
+    class NotFound < StandardError; end
+    
     @list = {}
     class << self
       attr_reader :list
       def [](k); @list[k] end
       def []=(k, v); @list[k] = v end
+        
+      def sign(mac, value)
+        s = Signatures[mac.length]
+        raise NotFound if signature.nil
+        s.sign(mac, value)
+      end
     end
       
     class Assoc
