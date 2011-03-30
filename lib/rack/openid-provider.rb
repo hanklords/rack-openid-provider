@@ -65,9 +65,12 @@ module OpenID
   end
 
   module Signatures # :nodoc: all
-    Associations = {}
-    def self.[](k); Associations[k] end
-    def self.[]=(k, v); Associations[k] = v end
+    @list = {}
+    class << self
+      attr_reader :list
+      def [](k); @list[k] end
+      def []=(k, v); @list[k] = v end
+    end
       
     class Assoc
       def initialize(digest); @digest = digest end
@@ -76,17 +79,20 @@ module OpenID
       def gen_mac; OpenID.random_bytes(size) end
     end
 
-    Associations["HMAC-SHA1"] = Assoc.new(OpenSSL::Digest::SHA1)
-    Associations["HMAC-SHA256"] = Assoc.new(OpenSSL::Digest::SHA256)
+    @list["HMAC-SHA1"] = Assoc.new(OpenSSL::Digest::SHA1)
+    @list["HMAC-SHA256"] = Assoc.new(OpenSSL::Digest::SHA256)
   end
 
-  module DH # :nodoc: all
+  module Sessions # :nodoc: all
     DEFAULT_MODULUS=0xDCF93A0B883972EC0E19989AC5A2CE310E1D37717E8D9571BB7623731866E61EF75A2E27898B057F9891C2E27A639C3F29B60814581CD3B2CA3986D2683705577D45C2E7E52DC81C7A171876E5CEA74B1448BFDFAF18828EFD2519F14E45E3826634AF1949E5B535CC829A483B8A76223E5D490A257F05BDFF16F2FB22C583AB
     DEFAULT_GEN=2
-    
-    Sessions = {}
-    def self.[](k); Sessions[k] end
-    def self.[]=(k, v); Sessions[k] = v end    
+
+    @list = {}
+    class << self
+      attr_reader :list
+      def [](k); @list[k] end
+      def []=(k, v); @list[k] = v end
+    end
 
     class SHA_ANY
       class MissingKey < StandardError; end
@@ -95,10 +101,10 @@ module OpenID
       def initialize(digest); @digest = digest end
 
       def to_hash(mac, p, g, consumer_public_key)
-        raise MissingKey if consumer_public_key.nil?
+        raise MissingKey if consumer_public_key.nil? or p.nil? or g.nil?
         
         c = OpenSSL::BN.new(consumer_public_key.to_s)
-        dh = gen_key(p || DEFAULT_MODULUS, g || DEFAULT_GEN)
+        dh = gen_key(p, g)
         shared = OpenSSL::BN.new(dh.compute_key(c), 2)
         shared_hashed = @digest.digest(OpenID.btwoc(shared))
         {
@@ -125,9 +131,9 @@ module OpenID
       def self.to_hash(mac, p, g, c); {"mac_key" => OpenID.base64_encode(mac)} end
     end
     
-    Sessions["DH-SHA1"] = SHA_ANY.new(OpenSSL::Digest::SHA1)
-    Sessions["DH-SHA256"] = SHA_ANY.new(OpenSSL::Digest::SHA256)
-    Sessions["no-encryption"] = NoEncryption
+    @list["DH-SHA1"] = SHA_ANY.new(OpenSSL::Digest::SHA1)
+    @list["DH-SHA256"] = SHA_ANY.new(OpenSSL::Digest::SHA256)
+    @list["no-encryption"] = NoEncryption
   end
 end
 
@@ -162,7 +168,7 @@ module Rack # :nodoc:
     def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
     def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
     def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
-    def session_type; OpenID::DH[params['session_type']] end
+    def session_type; OpenID::Sessions[params['session_type']] end
     def assoc_type; OpenID::Signatures[params['assoc_type']] end
       
     def realm_wildcard?; params['realm'] =~ %r(^https?://\.\*) end
@@ -431,7 +437,7 @@ module Rack # :nodoc:
         res.error!("session type or association type not supported", "error_code" => "unsupported-type")
       rescue NoSecureChannel
         res.error!("\"no-encryption\" session type requested without https connection")
-      rescue OpenID::DH::SHA_ANY::MissingKey
+      rescue OpenID::Sessions::SHA_ANY::MissingKey
         res.error!("dh_consumer_public missing")
       end
       
