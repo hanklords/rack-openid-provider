@@ -119,13 +119,15 @@ module Rack
         def enc_mac_key(mac, p, g, consumer_public_key)
           raise InvalidKey if consumer_public_key.nil?
           raise InvalidAssociation if mac.size != size
-          
+
           c = consumer_public_key.to_bn
           shared = shared_hashed(p || DEFAULT_MODULUS, g || DEFAULT_GEN, c)
           sxor(shared, mac)
         end
         
         def mac(dh_server_public, enc_mac_key)
+          raise InvalidAssociation if enc_mac_key.size != size
+
           s = dh_server_public.to_bn
           shared_hashed = shared_hashed(DEFAULT_MODULUS, DEFAULT_GEN, s)
           sxor(shared_hashed, enc_mac_key)
@@ -178,6 +180,7 @@ module Rack
       def dh_modulus; params['dh_modulus'] && OpenID.ctwob(OpenID.base64_decode(params['dh_modulus'])) end
       def dh_gen; params['dh_gen'] && OpenID.ctwob(OpenID.base64_decode(params['dh_gen'])) end
       def dh_consumer_public; params['dh_consumer_public'] && OpenID.ctwob(OpenID.base64_decode(params['dh_consumer_public'])) end
+      def dh_consumer_public=(key); params['dh_consumer_public'] = OpenID.base64_encode(OpenID.btwoc(key)) end
       def session; OpenID::Sessions[session_type] end
       def assoc; OpenID::Signatures[assoc_type] end
 
