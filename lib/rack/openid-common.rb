@@ -60,6 +60,12 @@ module Rack
       rescue Signatures::NotFound
         nil
       end
+
+      def extract_open_id_params(params)
+        openid_params = {}
+        params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
+        openid_params
+      end
     end
 
     module Signatures # :nodoc: all
@@ -231,4 +237,5 @@ module Rack
       def signed=(list) params["signed"] = list.join(",") end
     end
   end
+
 end

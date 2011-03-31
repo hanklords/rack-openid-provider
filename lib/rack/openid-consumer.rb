@@ -9,8 +9,15 @@ module Rack
     class Response
       include OpenID::Response
 
-      def initialize(res) @res = res end
-      def params; @h ||= OpenID.kv_decode(@res.body) end
+      attr_reader :params
+      def initialize(res, direct = false)
+        @params = if direct
+          OpenID.kv_decode(res.body)
+        else
+          OpenID.extract_open_id_params(Rack::Request.new(res).params)
+        end
+      end
+      
       def session_mac; session.mac(dh_server_public, enc_mac_key) end
     end
     
@@ -26,7 +33,7 @@ module Rack
 
         http_res = Net::HTTP.post_form(URI(endpoint), req.to_hash)
         
-        res = Response.new(http_res)
+        res = Response.new(http_res, true)
         p res.session_mac        
       end
       
@@ -37,6 +44,28 @@ module Rack
         @params.each {|k,v| h["openid.#{k}"] = v}
         h
       end
+      
+      def checkid_setup!(op_endpoint)
+        mode = "checkid_setup"
+        @op_endpoint = op_endpoint
+        finish!
+      end
+      
+      def checkid_immediate!(op_endpoint)
+        mode = "checkid_immediate"
+        @op_endpoint = op_endpoint
+        finish!
+      end
+      
+      def http_headers
+        headers = {"Content-Type" => "text/plain"}
+        d = URI(@op_endpoint)
+        d.query = d.query ? d.query + "&" + OpenID.url_encode(@params) : OpenID.url_encode(@params)
+        headers.merge!("Location" => d.to_s)
+      end
+      
+      def finish!; [302, http_headers, []] end
+      alias :to_a :finish!
     end
 
     DEFAULT_OPTIONS = {}
@@ -49,7 +78,7 @@ module Rack
     end
 
     def call(env)
-      Request.associate(env)
+      @middleware.call(env)
     end
   end
 end

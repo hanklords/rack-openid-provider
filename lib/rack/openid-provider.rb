@@ -18,20 +18,15 @@ module Rack
 
       attr_reader :env
       def initialize(env) @env = env end
-
+      def params
+        @env['openid.provider.request.params'] ||= OpenID.extract_open_id_params(Rack::Request.new(@env).params)
+      end
+      
       def valid?; mode and Rack::Request.new(@env).path_info == "/" end
-      def params; @env['openid.provider.request.params'] ||= extract_open_id_params end
       def nonces; @env['openid.provider.nonces'] end
       def handles; @env['openid.provider.handles'] end
       def private_handles; @env['openid.provider.private_handles'] end
       def options; @env['openid.provider.options'] end
-
-      private
-      def extract_open_id_params
-        openid_params = {}
-        Rack::Request.new(@env).params.each { |k,v| openid_params[$'] = v if k =~ /^openid\./ }
-        openid_params
-      end
     end
     
     class Response
@@ -57,7 +52,6 @@ module Rack
         @direct = true
         @return_to = nil
       end
-
 
       def direct?; @direct end
       def direct!; @direct = true end
