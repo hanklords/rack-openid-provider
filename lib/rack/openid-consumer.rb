@@ -1,6 +1,7 @@
-require 'rack/openid-provider'
 require 'net/http'
 require 'uri'
+require 'rack'
+require 'rack/openid-common'
 
 
 module Rack
@@ -23,8 +24,7 @@ module Rack
         req.session_type = 'DH-SHA1'
         req.dh_consumer_public = OpenID::Sessions['DH-SHA1'].pub_key
 
-        http_res = Net::HTTP.post_form(URI(endpoint),
-          req.to_hash)
+        http_res = Net::HTTP.post_form(URI(endpoint), req.to_hash)
         
         res = Response.new(http_res)
         p res.session_mac        
