@@ -246,6 +246,32 @@ module Rack
       end
       
       def service(type) @services.find {|s| s["Type"].include? type } end
+      def service_uri(type) service = service(type) and service["URI"].first end
+      def default_op_endpoint; service_uri(OpenID::SERVER) || service_uri(OpenID::SIGNON) end
+      
+      def default_identity
+        if service_uri(OpenID::SERVER)
+          OpenID::IDENTIFIER_SELECT
+        elsif service_uri(OpenID::SIGNON)
+          if localid = service(OpenID::SIGNON)["LocalID"].first
+            localid
+          else
+            default_claimed_id
+          end
+        else
+          nil
+        end
+      end
+      
+      def default_claimed_id
+        if service_uri(OpenID::SERVER)
+          OpenID::IDENTIFIER_SELECT
+        elsif service_uri(OpenID::SIGNON)
+          claimed_id
+        else
+          nil
+        end
+      end
       
       private
       def discover(url)

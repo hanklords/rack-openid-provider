@@ -99,25 +99,17 @@ module Rack
     def checkid(env, params)
       identity, immediate = params['identity'], params['immediate']
       discovery = OpenID::Services.new(identity)
-      if service = discovery.service(OpenID::SERVER) and
-          !service["URI"].empty?
-        identity = OpenID::IDENTIFIER_SELECT
-      elsif service = discovery.service(OpenID::SIGNON) and
-          !service["URI"].empty?
-        identity = discovery.claimed_id
-      else
-        identity = nil
-      end
-      
-      if identity
+
+      if op_endpoint = discovery.default_op_endpoint
         req = Request.new
-        req.claimed_id = req.identity = identity
+        req.claimed_id = discovery.default_claimed_id
+        req.identity = discovery.default_identity
         req.realm = self_return_to(env)
         req.return_to = self_return_to(env)
         if immediate
-          req.checkid_setup!(service["URI"].first)
+          req.checkid_setup!(op_endpoint)
         else
-          req.checkid_immediate!(service["URI"].first)
+          req.checkid_immediate!(op_endpoint)
         end
       else
         [302, {"Content-Length" => "0", "Location" => self_return_to(env)}, []]
