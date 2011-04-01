@@ -1,6 +1,7 @@
 require 'rack'
 require 'openssl'
 require 'uri'
+require 'nokogiri'
 
 
 module Rack
@@ -236,6 +237,88 @@ module Rack
       def signed; (params["signed"] || '').split(",") end
       def signed=(list) params["signed"] = list.join(",") end
     end
-  end
 
+    class Services
+      attr_reader :claimed_id, :services
+      def initialize(identifier)
+        @services = []
+        discover(identifier)
+      end
+      
+      def service(type) @services.find {|s| s["Type"].include? type } end
+      
+      private
+      def discover(url)
+        url = "http://" + url if url !~ %r(^https?://)
+
+        @http = nil
+        limit = 10
+        redirect = true
+        while redirect and limit > 0
+          redirect = false
+          r = do_http_request(url)
+          if Net::HTTPRedirection === r
+            redirect = true
+            url = r['location']
+            limit -= 1
+          end
+        end
+        
+        if Net::HTTPSuccess === r
+          if xrds_url = r['X-XRDS-Location']
+            @xrds = Nokogiri.XML(do_http_request(xrds_url).body)
+          elsif r['Content-Type'] == 'application/xrds+xml'
+            @xrds = Nokogiri.XML(r.body)
+          elsif r['Content-Type'] == 'text/html'
+            @html = Nokogiri.HTML(r.body)
+          else
+            @xrds = nil
+          end
+          
+          find_services_xrds
+          find_services_html
+          @claimed_id = url
+        end
+        
+        @http and @http.finish
+      end
+      
+      def find_services_xrds
+        if @xrds
+          @xrds.search("Service").each {|node|
+            service = Hash.new {|h,k| h[k] = []}
+            node.children.map {|type|
+              service[type.name] << type.text if type.name != "text"
+            }
+            @services << service
+          }
+        end
+      end
+      
+      def find_services_html
+        if @html
+          service = Hash.new {|h,k| h[k] = []}
+          uri = @xrds.search("head link[rel='openid2.provider']")["href"]
+          local_id = @xrds.search("head link[rel='openid2.local_id']")["href"]
+          
+          service["Type"] << [SIGNON]
+          service["URI"] << uri
+          service["LocalID"] << local_id         
+          
+          @services << service
+        end
+      end
+      
+      def do_http_request(url)
+        url = URI(url)
+        if @http.nil? or @http.address != url.host or @http.port != url.port
+          @http and @http.finish
+          @http = Net::HTTP.start(url.host, url.port)
+        end
+        
+        @http.get(url.path, 'Accept' => 'application/xrds+xml')
+      end
+    end
+
+  end
 end
