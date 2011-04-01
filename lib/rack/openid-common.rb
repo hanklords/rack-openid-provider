@@ -249,6 +249,7 @@ module Rack
       
       private
       def discover(url)
+        return if url.nil? or url.empty?
         url = "http://" + url if url !~ %r(^https?://)
 
         @http = nil
@@ -311,6 +312,7 @@ module Rack
       
       def do_http_request(url)
         url = URI(url)
+        url.path = "/" if url.path.empty?
         if @http.nil? or @http.address != url.host or @http.port != url.port
           @http and @http.finish
           @http = Net::HTTP.start(url.host, url.port)
