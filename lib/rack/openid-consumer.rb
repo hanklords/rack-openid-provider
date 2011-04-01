@@ -24,19 +24,27 @@ module Rack
     class Request
       include OpenID::Request
 
-      def self.associate(endpoint)
+      def self.associate(endpoint, params = {})
         req = Request.new
         req.mode = 'associate'
         req.assoc_type = 'HMAC-SHA1'
         req.session_type = 'DH-SHA1'
         req.dh_consumer_public = OpenID::Sessions['DH-SHA1'].pub_key
+        req.params.merge!(params)
+        
+        http_res = Net::HTTP.post_form(URI(endpoint), req.to_hash)
+        Response.new(http_res, true)
+      end
+
+      def self.check_authentication(endpoint, params = {})
+        req = Request.new
+        req.mode = 'check_authentication'
+        req.params.merge!(params)
 
         http_res = Net::HTTP.post_form(URI(endpoint), req.to_hash)
-        
-        res = Response.new(http_res, true)
-        p res.session_mac        
+        Response.new(http_res, true)
       end
-      
+            
       attr_reader :params
       def initialize; @params = {'ns' => OpenID::NS} end
       def to_hash
@@ -89,7 +97,7 @@ module Rack
     
     private
     def checkid(env, params)
-      identity = params['identity']
+      identity, immediate = params['identity'], params['immediate']
       discovery = OpenID::Services.new(identity)
       if service = discovery.service(OpenID::SERVER) and
           !service["URI"].empty?
@@ -106,7 +114,11 @@ module Rack
         req.claimed_id = req.identity = identity
         req.realm = self_return_to(env)
         req.return_to = self_return_to(env)
-        req.checkid_setup!(service["URI"].first)
+        if immediate
+          req.checkid_setup!(service["URI"].first)
+        else
+          req.checkid_immediate!(service["URI"].first)
+        end
       else
         [302, {"Content-Length" => "0", "Location" => self_return_to(env)}, []]
       end
