@@ -227,7 +227,6 @@ module Rack
 
         # Create an association handle
         mac = req.handles[handle = OpenIDProvider.gen_handle] = req.assoc.gen_mac
-        p mac
         
         res = Response.new
         res.assoc_handle = handle
