@@ -6,7 +6,7 @@ require 'nokogiri'
 
 module Rack
   module OpenID
-    VERSION="0.0"
+    VERSION="0.1"
 
     NS="http://specs.openid.net/auth/2.0".freeze
     IDENTIFIER_SELECT="http://specs.openid.net/auth/2.0/identifier_select".freeze

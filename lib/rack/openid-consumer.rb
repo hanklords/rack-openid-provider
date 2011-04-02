@@ -18,7 +18,6 @@ module Rack
         end
       end
       
-      def session_mac; session.mac(dh_server_public, enc_mac_key) end
       def mac_key
         session.crypted? ? session.mac(dh_server_public, enc_mac_key) : @params["mac_key"]
       end
@@ -88,12 +87,21 @@ module Rack
     def call(env)
       clean_handles
       
+      res = Response.new(env)
+      if res.mode and Rack::Request.new(@env).path_info == "/"
+        check_authentication(res)
+      end
+      
       c,h,b = @middleware.call(env)
       if c == 401 and auth_header = h["WWW-Authenticate"] and auth_header =~ /^OpenID /
         params = OpenIDConsumer.parse_header(auth_header)
         params["discovery"] = OpenID::Services.new(params["identity"])
-        params["assoc_handle"] = get_associate_handle(env, params)
-        checkid(env, params)
+        if params["discovery"].default_op_endpoint
+          params["assoc_handle"] = get_associate_handle(env, params)
+          checkid(env, params)
+        else
+          [302, {"Content-Length" => "0", "Location" => self_return_to(env)}, []]
+        end
       else
         [c,h,b]
       end
@@ -129,21 +137,21 @@ module Rack
       identity, immediate = params["identity"], params["immediate"]
       discovery, assoc_handle = params["discovery"], params["assoc_handle"]
 
-      if op_endpoint = discovery.default_op_endpoint
-        req = Request.new
-        req.assoc_handle = assoc_handle if assoc_handle
-        req.claimed_id = discovery.default_claimed_id
-        req.identity = discovery.default_identity
-        req.realm = self_return_to(env)
-        req.return_to = self_return_to(env)
-        if immediate
-          req.checkid_immediate!(op_endpoint)
-        else
-          req.checkid_setup!(op_endpoint)
-        end
+      req = Request.new
+      req.assoc_handle = assoc_handle if assoc_handle
+      req.claimed_id = discovery.default_claimed_id
+      req.identity = discovery.default_identity
+      req.realm = self_return_to(env)
+      req.return_to = self_return_to(env)
+      if immediate
+        req.checkid_immediate!(discovery.default_op_endpoint)
       else
-        [302, {"Content-Length" => "0", "Location" => self_return_to(env)}, []]
+        req.checkid_setup!(discovery.default_op_endpoint)
       end
+    end
+    
+    def check_authentication(res)
+      
     end
 
     def self_return_to(env)
