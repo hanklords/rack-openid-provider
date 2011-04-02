@@ -23,46 +23,39 @@ module Rack
     
     class Request
       include OpenID::Request
-
-      def self.associate(endpoint, params = {})
-        req = Request.new
-        req.mode = 'associate'
-        req.assoc_type = 'HMAC-SHA1'
-        req.session_type = 'DH-SHA1'
-        req.dh_consumer_public = OpenID::Sessions['DH-SHA1'].pub_key
-        req.params.merge!(params)
-        
-        http_res = Net::HTTP.post_form(URI(endpoint), req.to_hash)
-        Response.new(http_res, true)
-      end
-
-      def self.check_authentication(endpoint, params = {})
-        req = Request.new
-        req.mode = 'check_authentication'
-        req.params.merge!(params)
-
-        http_res = Net::HTTP.post_form(URI(endpoint), req.to_hash)
-        Response.new(http_res, true)
-      end
-            
+      
       attr_reader :params
       def initialize; @params = {'ns' => OpenID::NS} end
-      def to_hash
-        h = {}
-        @params.each {|k,v| h["openid.#{k}"] = v}
-        h
+      
+      def associate!(op_endpoint, params = {})
+        @params.merge! params
+        mode = "associate"
+        @op_endpoint = op_endpoint
+        assoc_type = "HMAC-SHA1"
+        session_type = "DH-SHA1"
+        dh_consumer_public = OpenID::Sessions["DH-SHA1"].pub_key
+        direct!
       end
       
-      def checkid_setup!(op_endpoint)
+      def checkid_setup!(op_endpoint, params = {})
+        @param.merge! params
         mode = "checkid_setup"
         @op_endpoint = op_endpoint
         finish!
       end
       
-      def checkid_immediate!(op_endpoint)
+      def checkid_immediate!(op_endpoint, params = {})
+        @param.merge! params
         mode = "checkid_immediate"
         @op_endpoint = op_endpoint
         finish!
+      end
+      
+      def check_authentication(op_endpoint, params = {})
+        @param.merge! params
+        mode = "check_authentication"
+        @op_endpoint = op_endpoint
+        direct!
       end
       
       def http_headers
@@ -74,6 +67,12 @@ module Rack
       
       def finish!; [302, http_headers, []] end
       alias :to_a :finish!
+      
+      def direct!
+        h = Hash[@params.each {|k,v| ["openid.#{k}", v]}]
+        http_res = Net::HTTP.post_form(URI(@op_endpoint), h)
+        Response.new(http_res, true)        
+      end
     end
 
     DEFAULT_OPTIONS = {}
