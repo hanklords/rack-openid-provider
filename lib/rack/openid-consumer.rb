@@ -106,9 +106,9 @@ module Rack
         req.realm = self_return_to(env)
         req.return_to = self_return_to(env)
         if immediate
-          req.checkid_setup!(op_endpoint)
-        else
           req.checkid_immediate!(op_endpoint)
+        else
+          req.checkid_setup!(op_endpoint)
         end
       else
         [302, {"Content-Length" => "0", "Location" => self_return_to(env)}, []]
