@@ -19,6 +19,9 @@ module Rack
       end
       
       def session_mac; session.mac(dh_server_public, enc_mac_key) end
+      def mac_key
+        session.crypted? ? session.mac(dh_server_public, enc_mac_key) : @params["mac_key"]
+      end
     end
     
     class Request
@@ -29,31 +32,28 @@ module Rack
       
       def associate!(op_endpoint, params = {})
         @params.merge! params
-        mode = "associate"
+        self.mode = "associate"
         @op_endpoint = op_endpoint
-        assoc_type = "HMAC-SHA1"
-        session_type = "DH-SHA1"
-        dh_consumer_public = OpenID::Sessions["DH-SHA1"].pub_key
         direct!
       end
       
       def checkid_setup!(op_endpoint, params = {})
         @params.merge! params
-        mode = "checkid_setup"
+        self.mode = "checkid_setup"
         @op_endpoint = op_endpoint
         finish!
       end
       
       def checkid_immediate!(op_endpoint, params = {})
         @params.merge! params
-        mode = "checkid_immediate"
+        self.mode = "checkid_immediate"
         @op_endpoint = op_endpoint
         finish!
       end
       
       def check_authentication(op_endpoint, params = {})
         @params.merge! params
-        mode = "check_authentication"
+        self.mode = "check_authentication"
         @op_endpoint = op_endpoint
         direct!
       end
@@ -69,7 +69,7 @@ module Rack
       alias :to_a :finish!
       
       def direct!
-        h = Hash[@params.each {|k,v| ["openid.#{k}", v]}]
+        h = Hash[@params.map {|k,v| ["openid.#{k}", v]}]
         http_res = Net::HTTP.post_form(URI(@op_endpoint), h)
         Response.new(http_res, true)        
       end
@@ -81,6 +81,7 @@ module Rack
     attr_reader :options
     def initialize(app, options = {})
       @options = DEFAULT_OPTIONS.merge(options)
+      @associations, @handles = {}, {}
       @middleware = DEFAULT_MIDDLEWARES.reverse.inject(app) {|a, m| m.new(a)}
     end
 
@@ -88,6 +89,8 @@ module Rack
       c,h,b = @middleware.call(env)
       if c == 401 and auth_header = h["WWW-Authenticate"] and auth_header =~ /^OpenID /
         params = OpenIDConsumer.parse_header(auth_header)
+        params["discovery"] = OpenID::Services.new(params["identity"])
+        params["assoc_handle"] = get_associate_handle(env, params)
         checkid(env, params)
       else
         [c,h,b]
@@ -95,12 +98,36 @@ module Rack
     end
     
     private
+    def get_associate_handle(env, params)
+      op_endpoint = params["discovery"].default_op_endpoint
+      if @associations[op_endpoint].nil?
+        params["assoc_type"], params["session_type"] = "HMAC-SHA256", "DH-SHA256"
+        res = associate(env, params)
+        if assoc_handle = res.assoc_handle
+          @handles[assoc_handle] = res.mac_key
+          @associations[op_endpoint] = assoc_handle
+        end
+      end
+      
+      @associations[op_endpoint]
+    end
+    
+    def associate(env, params)
+      op_endpoint = params["discovery"].default_op_endpoint
+      req = Request.new
+      req.assoc_type = "HMAC-SHA256"
+      req.session_type = "DH-SHA256"
+      req.dh_consumer_public = OpenID::Sessions["DH-SHA256"].pub_key
+      req.associate!(op_endpoint)
+    end
+    
     def checkid(env, params)
-      identity, immediate = params['identity'], params['immediate']
-      discovery = OpenID::Services.new(identity)
+      identity, immediate = params["identity"], params["immediate"]
+      discovery, assoc_handle = params["discovery"], params["assoc_handle"]
 
       if op_endpoint = discovery.default_op_endpoint
         req = Request.new
+        req.assoc_handle = assoc_handle if assoc_handle
         req.claimed_id = discovery.default_claimed_id
         req.identity = discovery.default_identity
         req.realm = self_return_to(env)
