@@ -86,6 +86,8 @@ module Rack
     end
 
     def call(env)
+      clean_handles
+      
       c,h,b = @middleware.call(env)
       if c == 401 and auth_header = h["WWW-Authenticate"] and auth_header =~ /^OpenID /
         params = OpenIDConsumer.parse_header(auth_header)
@@ -98,6 +100,8 @@ module Rack
     end
     
     private
+    def clean_handles; end
+    
     def get_associate_handle(env, params)
       op_endpoint = params["discovery"].default_op_endpoint
       if @associations[op_endpoint].nil?
