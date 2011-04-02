@@ -38,21 +38,21 @@ module Rack
       end
       
       def checkid_setup!(op_endpoint, params = {})
-        @param.merge! params
+        @params.merge! params
         mode = "checkid_setup"
         @op_endpoint = op_endpoint
         finish!
       end
       
       def checkid_immediate!(op_endpoint, params = {})
-        @param.merge! params
+        @params.merge! params
         mode = "checkid_immediate"
         @op_endpoint = op_endpoint
         finish!
       end
       
       def check_authentication(op_endpoint, params = {})
-        @param.merge! params
+        @params.merge! params
         mode = "check_authentication"
         @op_endpoint = op_endpoint
         direct!
